@@ -14,13 +14,77 @@ var http = require('http');
 var invariant = require('assert');
 var url = require('url');
 var vm = require('vm');
-
 var currentContext = null;
+
+var fs = require('fs');
+var cp = require('child_process')
+const fifoPath = '/tmp/.nuclide-react-native-node-executor-fifo';
+try {
+  cp.execSync('mkfifo ' + fifoPath+".parent")
+} catch (e) {}
+try {
+  cp.execSync('mkfifo ' + fifoPath+".child")
+} catch (e) {}
+
+function send(message) {
+  message = JSON.stringify(message)
+//  console.log("sending "+message)
+  cp.execSync("echo '"+message+"'>"+fifoPath+".parent")
+}
+function read() {
+  return fs.readFileSync(fifoPath+".child", {encoding: "utf8"})
+}
+
+
+
+var command = process.execPath+" "+require.resolve('./worker.js')+" "+fifoPath
+console.log(command)
+var worker = cp.exec(command)
+
+console.log(read())
+
+var nodeXMLHttpRequest = function() {
+    var settings;
+    this.open = function(method, url, async, user, password) {
+        settings = {
+            "method": method,
+            "url": url.toString(),
+            "async": (typeof async !== "boolean" ? true : async),
+            "user": user || null,
+            "password": password || null
+        };
+    }
+    this.send = function(body) {
+      var parsed = url.parse(settings.url)
+      var options = {
+        protocol: parsed.protocol || 'http:',
+        hostname: parsed.hostname || 'localhost',
+        port: parsed.port || 80,
+        method: settings.method,
+        headers: {
+          'Content-Type': 'text/json'
+        },
+        path: parsed.path
+      }
+      var command = {
+        options: options,
+        body: body
+      }
+      send(command);
+      var result = read();
+//      console.log("received response "+result)
+      result = JSON.parse(result);
+      this.error = result.error;
+      this.status = result.statusCode;
+      this.responseText = result.body;
+    }
+}
+
 
 process.on('message', function(request) {
   switch (request.method) {
     case 'prepareJSRuntime':
-      currentContext = vm.createContext({console});
+      currentContext = vm.createContext({console, nodeXMLHttpRequest});
       sendResult(request.id);
       return;
 
