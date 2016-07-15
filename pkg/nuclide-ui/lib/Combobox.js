@@ -61,6 +61,7 @@ export class Combobox extends React.Component {
     onChange: React.PropTypes.func.isRequired,
     onRequestOptionsError: React.PropTypes.func,
     onSelect: React.PropTypes.func.isRequired,
+    onBlur: React.PropTypes.func,
     /**
      * promise-returning function; Gets called with
      * the current value of the input field as its only argument
@@ -111,7 +112,7 @@ export class Combobox extends React.Component {
       atom.commands.add(node, 'core:confirm', this._handleConfirm),
       this.refs.freeformInput.onDidChange(this._handleTextInputChange)
     );
-    this.requestUpdate();
+    this.requestUpdate(this.state.textInput);
   }
 
   componentWillUnmount() {
@@ -123,7 +124,7 @@ export class Combobox extends React.Component {
     }
   }
 
-  requestUpdate(): void {
+  requestUpdate(textInput: string): void {
     // Cancel pending update.
     if (this._updateSubscription != null) {
       this._updateSubscription.unsubscribe();
@@ -132,7 +133,7 @@ export class Combobox extends React.Component {
     this.setState({error: null, loadingOptions: true});
 
     this._updateSubscription = Rx.Observable.fromPromise(
-      this.props.requestOptions(this.state.textInput)
+      this.props.requestOptions(textInput)
     )
       .subscribe(
         options => this.receiveUpdate(options),
@@ -199,7 +200,7 @@ export class Combobox extends React.Component {
     if (newText === this.state.textInput) {
       return;
     }
-    this.requestUpdate();
+    this.requestUpdate(newText);
     const filteredOptions = this._getFilteredOptions(this.state.options, newText);
     let selectedIndex;
     if (filteredOptions.length === 0) {
@@ -223,7 +224,7 @@ export class Combobox extends React.Component {
   }
 
   _handleInputFocus(): void {
-    this.requestUpdate();
+    this.requestUpdate(this.state.textInput);
     this.setState({optionsVisible: true});
   }
 
@@ -232,6 +233,9 @@ export class Combobox extends React.Component {
     // case the blur was caused by a click inside the combobox. 150ms is empirically long enough to
     // let the stack clear from this blur event and for the click event to trigger.
     setTimeout(this._handleCancel, 150);
+    if (this.props.onBlur) {
+      this.props.onBlur(this.getText());
+    }
   }
 
   _handleItemClick(selectedValue: string, event: any) {

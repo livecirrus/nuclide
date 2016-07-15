@@ -9,9 +9,9 @@
  * the root directory of this source tree.
  */
 
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {getHackEnvironmentDetails} from '../../nuclide-hack/lib/utils';
-import {CompositeDisposable, Disposable} from 'atom';
-import {EventEmitter} from 'events';
+import {CompositeDisposable, Emitter} from 'atom';
 import {getBuckProjectRoot} from '../../nuclide-buck-base';
 import {trackTiming} from '../../nuclide-analytics';
 import remoteUri from '../../nuclide-remote-uri';
@@ -25,14 +25,14 @@ type ProjectType = 'Buck' | 'Hhvm' | 'Other';
 
 class ProjectStore {
   _disposables: CompositeDisposable;
-  _eventEmitter: EventEmitter;
+  _emitter: Emitter;
   _currentFilePath: string;
   _projectType: ProjectType;
   _filePathsToScriptCommand: Map<string, string>;
 
   constructor() {
     this._disposables = new CompositeDisposable();
-    this._eventEmitter = new EventEmitter();
+    this._emitter = new Emitter();
     this._currentFilePath = '';
     this._projectType = 'Other';
     this._filePathsToScriptCommand = new Map();
@@ -66,7 +66,7 @@ class ProjectStore {
     } else if (await this._isFileHHVMProject(fileName)) {
       this._projectType = 'Hhvm';
     }
-    this._eventEmitter.emit('change');
+    this._emitter.emit('change');
   }
 
   @trackTiming('toolbar.isFileHHVMProject')
@@ -95,10 +95,8 @@ class ProjectStore {
     this._filePathsToScriptCommand.set(remoteUri.getPath(this._currentFilePath), command);
   }
 
-  onChange(callback: () => void): Disposable {
-    const emitter = this._eventEmitter;
-    this._eventEmitter.on('change', callback);
-    return (new Disposable(() => emitter.removeListener('change', callback)));
+  onChange(callback: () => void): IDisposable {
+    return this._emitter.on('change', callback);
   }
 
   getCurrentFilePath(): string {

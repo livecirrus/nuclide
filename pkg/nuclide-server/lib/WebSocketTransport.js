@@ -59,6 +59,15 @@ export class WebSocketTransport {
         logger.error(`Client #${this.id} error after close: ${e.message}`);
       }
     });
+
+    socket.on('pong', (data, flags) => {
+      if (this._socket != null) {
+        // data may be a Uint8Array
+        this._emitter.emit('pong', data != null ? String(data) : data);
+      } else {
+        logger.error('Received socket pong after connection closed');
+      }
+    });
   }
 
   _onSocketMessage(message: string): void {
@@ -98,6 +107,19 @@ export class WebSocketTransport {
         }
       });
     });
+  }
+
+  // The WS socket automatically responds to pings with pongs.
+  ping(data: ?string): void {
+    if (this._socket != null) {
+      this._socket.ping(data);
+    } else {
+      logger.error('Attempted to send socket ping after connection closed');
+    }
+  }
+
+  onPong(callback: (data: ?string) => void): IDisposable {
+    return this._emitter.on('pong', callback);
   }
 
   close(): void {

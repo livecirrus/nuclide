@@ -17,6 +17,7 @@ import {
 } from '../pkg/nuclide-integration-test-helpers';
 
 import featureConfig from '../pkg/nuclide-feature-config';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {getDefaultConfigValue} from '../pkg/nuclide-settings/lib/settings-utils';
 import {
   testSettingsCheckbox,
@@ -25,11 +26,20 @@ import {
 } from './utils/settings-pane-common';
 
 describe('Settings View Integration Test', () => {
+
+  beforeEach(() => {
+    // Activate nuclide packages.
+    waitsForPromise(activateAllPackages);
+  });
+
+  afterEach(() => {
+    // Deactivate nuclide packages.
+    deactivateAllPackages();
+  });
+
   it('tests my feature', () => {
     waitsForPromise(async () => {
       jasmineIntegrationTestSetup();
-      // Activate nuclide packages.
-      await activateAllPackages();
 
       // Show settings UI
       dispatchKeyboardEvent(',', document.activeElement, {cmd: true, alt: true});
@@ -64,8 +74,6 @@ describe('Settings View Integration Test', () => {
       const tmpClangFlagsValue = ['-E', '-g'];
       testSettingsInput(clangFlagsKeyPath, clangFlagsValue, tmpClangFlagsValue);
 
-      // Deactivate nuclide packages.
-      deactivateAllPackages();
     });
   });
 });

@@ -9,30 +9,30 @@
  * the root directory of this source tree.
  */
 
-import type {HackSearchResult} from './types';
 import type {NuclideUri} from '../../nuclide-remote-uri';
 import type {LogLevel} from '../../nuclide-logging/lib/rpc-types';
+import type {
+  HackRange,
+  HackCompletion,
+} from './rpc-types';
 
-import fsPromise from '../../commons-node/fsPromise';
 import {retryLimit} from '../../commons-node/promise';
-import {SymbolType} from '../../nuclide-hack-common';
 import {
   callHHClient,
   getSearchResults,
 } from './HackHelpers';
-import {setHackCommand, setUseIde, getHackExecOptions} from './hack-config';
-import nuclideUri from '../../nuclide-remote-uri';
-import {logger} from './hack-config';
+import {
+  findHackConfigDir,
+  setHackCommand,
+  setUseIdeConnection,
+  getHackExecOptions,
+} from './hack-config';
+import {getUseIdeConnection, logger} from './hack-config';
+import {getHackConnectionService} from './HackProcess';
 
 export type SymbolTypeValue = 0 | 1 | 2 | 3 | 4;
 
-export type HackDiagnosticsResult = {
-  // The location of the .hhconfig where these messages came from.
-  hackRoot: NuclideUri;
-  messages: Array<{
-    message: HackDiagnostic;
-  }>;
-};
+export type HackDiagnosticsResult = Array<{message: HackDiagnostic}>;
 
 /**
  * Each error or warning can consist of any number of different messages from
@@ -50,18 +50,6 @@ export type SingleHackMessage = {
   end: number;
 };
 
-export type HackFunctionDetails = {
-  params: Array<{name: string}>;
-};
-
-// Note that all line/column values are 1-based.
-export type HackRange = {
-  filename: NuclideUri;
-  line: number;
-  char_start: number;
-  char_end: number;
-};
-
 // Note that all line/column values are 1-based.
 export type HackSpan = {
   filename: NuclideUri;
@@ -71,27 +59,10 @@ export type HackSpan = {
   char_end: number;
 };
 
-export type HackCompletion = {
-  name: string;
-  type: string;
-  pos: HackRange;
-  func_details: ?HackFunctionDetails;
-};
 
-export type HackCompletionsResult = {
-  hackRoot: NuclideUri;
-  completions: Array<HackCompletion>;
-};
+export type HackCompletionsResult = Array<HackCompletion>;
 
-export type HackDefinitionResult = {
-  hackRoot: NuclideUri;
-  definitions: Array<HackSearchPosition>;
-};
-
-export type HackReferencesResult = {
-  hackRoot: NuclideUri;
-  references: Array<HackReference>;
-};
+export type HackReferencesResult = Array<HackReference>;
 
 export type HackSearchPosition = {
   path: NuclideUri;
@@ -135,21 +106,12 @@ export type HackTypeAtPosResult = {
   pos: ?HackRange;
 };
 
-export type HackFindLvarRefsResult = {
-  positions: Array<HackRange>;
-  internal_error: boolean;
-};
+export type HackHighlightRefsResult = Array<HackRange>;
 
 export type HackFormatSourceResult = {
   error_message: string;
   result: string;
   internal_error: boolean;
-};
-
-export type HackGetMethodNameResult = {
-  name: string;
-  result_type: 'class' | 'method' | 'function' | 'local';
-  pos: HackRange;
 };
 
 export type HackDefinition = {
@@ -180,9 +142,9 @@ export async function getDiagnostics(
   if (!hhResult) {
     return null;
   }
-  const {hackRoot, result} = hhResult;
+
   const messages = (
-    (result: any): {errors: Array<{message: HackDiagnostic}>}
+    (hhResult: any): {errors: Array<{message: HackDiagnostic}>}
   ).errors;
 
   // Use a consistent null 'falsy' value for the empty string, undefined, etc.
@@ -192,58 +154,44 @@ export async function getDiagnostics(
     });
   });
 
-  return {
-    hackRoot,
-    messages,
-  };
+  return messages;
 }
 
 export async function getCompletions(
   file: NuclideUri,
-  markedContents: string,
-): Promise<?HackCompletionsResult> {
-  const hhResult = await callHHClient(
-    /*args*/ ['--auto-complete'],
-    /*errorStream*/ false,
-    /*outputJson*/ true,
-    /*processInput*/ markedContents,
-    /*file*/ file,
-  );
-  if (!hhResult) {
-    return null;
-  }
-  const {hackRoot, result} = hhResult;
-  const completions = ((result : any): Array<HackCompletion>);
-  return {
-    hackRoot,
-    completions,
-  };
-}
-
-export async function getIdentifierDefinition(
-  file: NuclideUri,
   contents: string,
+  offset: number,
   line: number,
   column: number,
-): Promise<?HackDefinitionResult> {
-  const hhResult = await callHHClient(
-    // The `indetify-function` result is text, but passing --json option
-    // will eliminate any hh status messages that's irrelevant.
-    /*args*/ ['--json', '--identify-function', formatLineColumn(line, column)],
-    /*errorStream*/ false,
-    /*outputJson*/ false,
-    /*processInput*/ contents,
-    /*cwd*/ file,
-  );
-  if (!hhResult) {
-    return null;
+): Promise<?HackCompletionsResult> {
+  if (getUseIdeConnection()) {
+    const service = await getHackConnectionService(file);
+    if (service == null) {
+      return null;
+    }
+
+    // The file notifications are a placeholder until we get
+    // full file synchronization implemented.
+    await service.didOpenFile(file);
+    try {
+      const VERSION_PLACEHOLDER = 1;
+      await service.didChangeFile(
+        file, VERSION_PLACEHOLDER, [{text: contents}]);
+      return await service.getCompletions(file, {line, column});
+    } finally {
+      await service.didCloseFile(file);
+    }
+  } else {
+    const markedContents = markFileForCompletion(contents, offset);
+    const result: any = await callHHClient(
+      /*args*/ ['--auto-complete'],
+      /*errorStream*/ false,
+      /*outputJson*/ true,
+      /*processInput*/ markedContents,
+      /*file*/ file,
+    );
+    return result;
   }
-  const identifier = (hhResult.result || '').trim();
-  if (!identifier) {
-    return null;
-  }
-  const searchResponse = await getSearchResults(file, identifier);
-  return selectDefinitionSearchResults(searchResponse, identifier);
 }
 
 export async function getDefinition(
@@ -252,19 +200,13 @@ export async function getDefinition(
   line: number,
   column: number,
 ): Promise<Array<HackDefinition>> {
-  const hhResult: any = await callHHClient(
+  const result: any = await callHHClient(
     /*args*/ ['--ide-get-definition', formatLineColumn(line, column)],
     /*errorStream*/ false,
     /*outputJson*/ true,
     /*processInput*/ contents,
     /*cwd*/ file,
   );
-  if (hhResult == null) {
-    return [];
-  }
-
-  // Results in the current file, have filename set to empty string.
-  const result = hhResult.result;
   if (result == null) {
     return [];
   }
@@ -286,31 +228,20 @@ export async function getDefinition(
   }
 }
 
-export async function getReferences(
-  filePath: NuclideUri,
-  symbolName: string,
-  symbolType?: SymbolTypeValue,
+export async function findReferences(
+  file: NuclideUri,
+  contents: string,
+  line: number,
+  column: number,
 ): Promise<?HackReferencesResult> {
-  let cmd = '--find-refs';
-  if (symbolType === SymbolType.CLASS) {
-    cmd = '--find-class-refs';
-  }
-  const hhResult = await callHHClient(
-    /*args*/ [cmd, symbolName],
+  const result: any = await callHHClient(
+    /*args*/ ['--ide-find-refs', formatLineColumn(line, column)],
     /*errorStream*/ false,
     /*outputJson*/ true,
-    /*processInput*/ null,
-    /*file*/ filePath,
+    /*processInput*/ contents,
+    /*cwd*/ file,
   );
-  if (!hhResult) {
-    return null;
-  }
-  const {hackRoot, result} = hhResult;
-  const references = ((result: any): Array<HackReference>);
-  return {
-    hackRoot,
-    references,
-  };
+  return result;
 }
 
 export function getHackEnvironmentDetails(
@@ -320,32 +251,9 @@ export function getHackEnvironmentDetails(
   logLevel: LogLevel,
 ): Promise<?{hackRoot: NuclideUri; hackCommand: string}> {
   setHackCommand(hackCommand);
-  setUseIde(useIdeConnection);
+  setUseIdeConnection(useIdeConnection);
   logger.setLogLevel(logLevel);
   return getHackExecOptions(localFile);
-}
-
-function selectDefinitionSearchResults(
-  searchReposnse: ?HackSearchResult,
-  query: string,
-): ?HackDefinitionResult {
-  if (!searchReposnse) {
-    return null;
-  }
-  const {result: searchResults, hackRoot} = searchReposnse;
-  const matchingResults = searchResults.filter(result => {
-    // If the request had a :: in it, it's a full name, so we should compare to
-    // the name of the result in that format.
-    let fullName = result.name;
-    if (query.indexOf('::') !== -1 && result.scope) {
-      fullName = result.scope + '::' + fullName;
-    }
-    return fullName === query;
-  });
-  return {
-    hackRoot,
-    definitions: matchingResults,
-  };
 }
 
 /**
@@ -384,17 +292,13 @@ export async function queryHack(
 
 export async function getTypedRegions(filePath: NuclideUri):
     Promise<?Array<HackTypedRegion>> {
-  const hhResult = await callHHClient(
+  const result = await callHHClient(
     /*args*/ ['--colour', filePath],
     /*errorStream*/ false,
     /*outputJson*/ true,
     /*processInput*/ null,
     /*file*/ filePath,
   );
-  if (!hhResult) {
-    return null;
-  }
-  const {result} = hhResult;
   return (result: any);
 }
 
@@ -402,17 +306,14 @@ export async function getIdeOutline(
   filePath: NuclideUri,
   contents: string,
 ): Promise<?HackIdeOutline> {
-  const hhResult = await callHHClient(
+  const result = await callHHClient(
     /*args*/ ['--ide-outline'],
     /*errorStream*/ false,
     /*outputJson*/ true,
     /*processInput*/ contents,
     filePath,
   );
-  if (hhResult == null) {
-    return null;
-  }
-  return (hhResult.result: any);
+  return (result: any);
 }
 
 export async function getTypeAtPos(
@@ -421,17 +322,13 @@ export async function getTypeAtPos(
   line: number,
   column: number,
 ): Promise<?HackTypeAtPosResult> {
-  const hhResult = await callHHClient(
+  const result = await callHHClient(
     /*args*/ ['--type-at-pos', formatLineColumn(line, column)],
     /*errorStream*/ false,
     /*outputJson*/ true,
     /*processInput*/ contents,
     /*file*/ filePath,
   );
-  if (!hhResult) {
-    return null;
-  }
-  const {result} = hhResult;
   return (result: any);
 }
 
@@ -440,18 +337,14 @@ export async function getSourceHighlights(
   contents: string,
   line: number,
   column: number,
-): Promise<?HackFindLvarRefsResult> {
-  const hhResult = await callHHClient(
-    /*args*/ ['--find-lvar-refs', formatLineColumn(line, column)],
+): Promise<?HackHighlightRefsResult> {
+  const result = await callHHClient(
+    /*args*/ ['--ide-highlight-refs', formatLineColumn(line, column)],
     /*errorStream*/ false,
     /*outputJson*/ true,
     /*processInput*/ contents,
     /*file*/ filePath,
   );
-  if (!hhResult) {
-    return null;
-  }
-  const {result} = hhResult;
   return (result: any);
 }
 
@@ -461,42 +354,13 @@ export async function formatSource(
   startOffset: number,
   endOffset: number,
 ): Promise<?HackFormatSourceResult> {
-  const hhResult = await callHHClient(
+  const result = await callHHClient(
     /*args*/ ['--format', startOffset, endOffset],
     /*errorStream*/ false,
     /*outputJson*/ true,
     /*processInput*/ contents,
     /*file*/ filePath,
   );
-  if (!hhResult) {
-    return null;
-  }
-  const {result} = hhResult;
-  return (result: any);
-}
-
-
-export async function getMethodName(
-  filePath: NuclideUri,
-  contents: string,
-  line: number,
-  column: number,
-): Promise<?HackGetMethodNameResult> {
-  const hhResult = await callHHClient(
-    /*args*/ ['--get-method-name', formatLineColumn(line, column)],
-    /*errorStream*/ false,
-    /*outputJson*/ true,
-    /*processInput*/ contents,
-    /*file*/ filePath,
-  );
-  if (!hhResult) {
-    return null;
-  }
-  const {result} = hhResult;
-  const name = (result: any).name;
-  if (name == null || name === '') {
-    return null;
-  }
   return (result: any);
 }
 
@@ -515,11 +379,17 @@ export async function isAvailableForDirectoryHack(rootDirectory: NuclideUri): Pr
  * @return whether the file represented by fileUri is inside of a Hack project.
  */
 export async function isFileInHackProject(fileUri: NuclideUri): Promise<boolean> {
-  const filePath = nuclideUri.getPath(fileUri);
-  const hhconfigPath = await fsPromise.findNearestFile('.hhconfig', nuclideUri.dirname(filePath));
+  const hhconfigPath = await findHackConfigDir(fileUri);
   return hhconfigPath != null;
 }
 
 function formatLineColumn(line: number, column: number): string {
   return `${line}:${column}`;
+}
+
+// Calculate the offset of the cursor from the beginning of the file.
+// Then insert AUTO332 in at this offset. (Hack uses this as a marker.)
+function markFileForCompletion(contents: string, offset: number): string {
+  return contents.substring(0, offset) +
+      'AUTO332' + contents.substring(offset, contents.length);
 }

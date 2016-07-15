@@ -1,5 +1,101 @@
 # Nuclide Changelog
 
+## v0.155.0
+
+* v0.152.0, v0.153.0, and v0.154.0 could not be packaged internally - skipping them.
+* Hotfix an overly-zealous python linter integration.
+
+## v0.151.0
+
+### General
+
+* [Fixed] Working Sets are significantly faster now.
+
+### React Native
+
+* Improve ADB Logcat errors.
+* Notify when the packager is running.
+
+### Buck
+
+* Added settings to allow providing of extra arguments to build/test/run.
+* Fixed an issue where Buck project would not be found after reloading Atom.
+
+### Python
+
+* Builtin flake8 linting, uses configuration from the nearest .flake8 file.
+
+### C/C++
+
+* Fixed instability while working with (local) files in large Buck targets.
+
+### Hack
+
+* [Fixed] Autocomplete and XHP, don't insert duplicate ':'
+* Improved the Autocomplete UI. In particular make function signatures easily visible.
+* Code highlighting now highlights all symbols, not just local variables.
+
+## v0.150.0
+
+* Hotfix a file-tree de-serialization bug resulting in an empty file-tree despite having a project mounted.
+
+## v0.149.0
+
+### General
+
+* Atom 1.8.0 is now the officially supported version of Atom.
+* Clicking on Find References preview now takes you to the reference.
+* Fixed Remote Project reconnection after a network interruption (like bad wifi or waking).
+* Fixed a scrolling bug in Open Files when the selected entry is the active file.
+* Fixed remote searching for things that look like broken regexes (e.g. `foo(`).
+* Fixed the blame gutter not hiding if blame failed to load.
+
+### C/C++
+
+* Added local-only setting for specifying the clang library path.
+* Fixed Nuclide buck source level iOS debugging.
+* Show `#pragma mark` in Outline view.
+
+### Console
+
+* RN Packager output now appears in Console.
+* Multiple sources can be shown at once in the console.
+* Processes can be started and stopped from console source list.
+
+### File Tree
+
+* Added keyboard shortcut (`cmd-f`) to "Search in Directory" from the file-tree.
+* Fixed canceling a "save" after a file's remote project root is removed.
+* Fixed removing a project after a re-start when that project's directory no longer exists.
+
+### Hack
+
+* Hack grammar now handles `HEREDOC`'s correctly.
+
+## v0.148.0
+
+**General**
+
+* 2-3X faster remote connection initialization
+* Fix bug with autoscrolling console
+* Various bugfixes for build toolbar
+* Build system can be selected using command palette
+* Path search: Now respects Atom's “Ignored Names” setting
+* More responsive file tree deletion for hg projects
+
+**Buck**
+
+* Build / test output now appears in the console
+* Buck commands are now cancellable (press the stop button in the toolbar)
+
+**Python**
+
+* Autocompletion/hyperclick support for Buck-based Python projects
+  * Requires that a python_binary or python_unittest target for the source file has been built. Currently we don't automatically run buck build, so make sure to do so manually.
+  * Will not work if a dependent python_binary or python_unittest isn't present in a parent directory's TARGETS/BUCK file.
+* Import/module resolution for autocompletion/hyperclick relative to top-level module
+* New setting to toggle arguments autocompletion
+
 ## v0.147.0
 
 Hotfix release. Fixes:

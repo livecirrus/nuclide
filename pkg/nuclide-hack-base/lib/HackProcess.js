@@ -9,20 +9,31 @@
  * the root directory of this source tree.
  */
 
+import typeof * as HackConnectionService from './HackConnectionService';
 import type {ProcessMaker} from '../../commons-node/RpcProcess';
 
+import nuclideUri from '../../nuclide-remote-uri';
 import {asyncExecute, safeSpawn} from '../../commons-node/process';
+import {maybeToString} from '../../commons-node/string';
 import RpcProcess from '../../commons-node/RpcProcess';
 import {getHackCommand, findHackConfigDir} from './hack-config';
-import {ServiceRegistry} from '../../nuclide-rpc';
+import {ServiceRegistry, loadServicesConfig} from '../../nuclide-rpc';
+import invariant from 'assert';
 
 // From https://reviews.facebook.net/diffusion/HHVM/browse/master/hphp/hack/src/utils/exit_status.ml
 const HACK_SERVER_ALREADY_EXISTS_EXIT_CODE = 77;
 
 import {logger} from './hack-config';
 
+let serviceRegistry: ?ServiceRegistry = null;
+
 function getServiceRegistry(): ServiceRegistry {
-  throw new Error('TODO');
+  if (serviceRegistry == null) {
+    serviceRegistry = ServiceRegistry.createLocal(
+      loadServicesConfig(nuclideUri.join(__dirname, '..'))
+    );
+  }
+  return serviceRegistry;
 }
 
 class HackProcess extends RpcProcess {
@@ -35,6 +46,11 @@ class HackProcess extends RpcProcess {
 
   getRoot(): string {
     return this._hhconfigPath;
+  }
+
+  getConnectionService(): Promise<HackConnectionService> {
+    invariant(!this.isDisposed(), 'getService called on disposed hackProcess');
+    return this.getService('HackConnectionService');
   }
 
   dispose(): void {
@@ -68,12 +84,12 @@ async function getHackProcess(filePath: string): Promise<?HackProcess> {
       }
     });
   }
-  return hackProcess;
+  return await hackProcess;
 }
 
 async function createHackProcess(command: string, configDir: string): Promise<?HackProcess> {
   logger.logInfo(`Creating new hack connection for ${configDir}: ${command}`);
-  logger.logInfo(`Current PATH: ${process.env.PATH}`);
+  logger.logInfo(`Current PATH: ${maybeToString(process.env.PATH)}`);
   const startServerResult = await asyncExecute(command, ['start', configDir]);
   logger.logInfo(
     `Hack connection start server results:\n${JSON.stringify(startServerResult, null, 2)}\n`);
@@ -85,22 +101,10 @@ async function createHackProcess(command: string, configDir: string): Promise<?H
   return new HackProcess(`HackProcess-${configDir}`, createProcess, configDir);
 }
 
-/**
- * Executes hh_client with proper arguments returning the result string or json object.
- */
-export async function callHHClientUsingProcess(
- args: Array<any>,
- processInput: ?string,
- filePath: string): Promise<?{hackRoot: string; result: string | Object}> {
-
-  const hackProcess: ?HackProcess = await getHackProcess(filePath);
-  if (hackProcess == null) {
+export async function getHackConnectionService(filePath: string): Promise<?HackConnectionService> {
+  const process = await getHackProcess(filePath);
+  if (process == null) {
     return null;
   }
-
-  if (processInput != null) {
-    args.push(processInput);
-  }
-  // TODO: This needs to be reworked
-  throw new Error('TODO');
+  return process.getConnectionService();
 }

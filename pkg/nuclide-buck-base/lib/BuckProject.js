@@ -32,7 +32,6 @@ export type dontRunOptions = {
 export type doRunOptions = {
   run: true;
   debug: boolean;
-  appArgs: Array<string>;
 };
 
 export type BuckRunOptions = dontRunOptions | doRunOptions;
@@ -100,6 +99,7 @@ export type BaseBuckBuildOptions = {
   runOptions?: ?BuckRunOptions;
   // The service framework doesn't support imported types
   commandOptions?: Object /*AsyncExecuteOptions*/;
+  extraArguments?: Array<string>;
 };
 type FullBuckBuildOptions = {
   baseOptions: BaseBuckBuildOptions;
@@ -124,6 +124,9 @@ const BLOCKING_BUCK_COMMAND_QUEUE_PREFIX = 'buck';
 /**
  * Represents a Buck project on disk. All Buck commands for a project should be
  * done through an instance of this class.
+ *
+ * TODO(hansonw): This should be a stateless set of global functions.
+ * In the meantime, don't introduce any additional state here.
  */
 export class BuckProject {
 
@@ -282,8 +285,6 @@ export class BuckProject {
    *   telling the launched application to stop at the loader breakpoint
    *   waiting for debugger to connect
    * @param simulator The UDID of the simulator to install the binary on.
-   * @param appArgs If 'run' is set to 'true', these are passed as the command line arguments to
-   *   the application being run.
    * @return Promise that resolves to a build report.
    */
   install(
@@ -339,8 +340,9 @@ export class BuckProject {
    */
   buildWithOutput(
     buildTargets: Array<string>,
+    extraArguments: Array<string>,
   ): Observable<ProcessMessage> {
-    return this._buildWithOutput(buildTargets, {});
+    return this._buildWithOutput(buildTargets, {extraArguments});
   }
 
   /**
@@ -356,8 +358,9 @@ export class BuckProject {
    */
   testWithOutput(
     buildTargets: Array<string>,
+    extraArguments: Array<string>,
   ): Observable<ProcessMessage> {
-    return this._buildWithOutput(buildTargets, {test: true});
+    return this._buildWithOutput(buildTargets, {test: true, extraArguments});
   }
 
   /**
@@ -373,10 +376,16 @@ export class BuckProject {
    */
   installWithOutput(
     buildTargets: Array<string>,
+    extraArguments: Array<string>,
     simulator: ?string,
     runOptions: ?BuckRunOptions,
   ): Observable<ProcessMessage> {
-    return this._buildWithOutput(buildTargets, {install: true, simulator, runOptions});
+    return this._buildWithOutput(buildTargets, {
+      install: true,
+      simulator,
+      runOptions,
+      extraArguments,
+    });
   }
 
   /**
@@ -414,6 +423,7 @@ export class BuckProject {
       install,
       simulator,
       test,
+      extraArguments,
     } = baseOptions;
     const runOptions = baseOptions.runOptions || {run: false};
 
@@ -435,11 +445,10 @@ export class BuckProject {
         if (runOptions.debug) {
           args.push('--wait-for-debugger');
         }
-        if (runOptions.appArgs) {
-          args.push('--');
-          args = args.concat(runOptions.appArgs);
-        }
       }
+    }
+    if (extraArguments != null) {
+      args = args.concat(extraArguments);
     }
     return args;
   }
@@ -461,20 +470,16 @@ export class BuckProject {
   }
 
   /**
-   * Currently, if `aliasOrTarget` contains a flavor, this will fail.
+   * Returns the build output metadata for the given target.
+   * This will contain one element if the target is unique; otherwise it will
+   * contain data for all the targets (e.g. for //path/to/targets:)
    *
-   * @return Promise resolves to absolute path to output file
+   * The build output path is typically contained in the 'buck.outputPath' key.
    */
-  async outputFileFor(aliasOrTarget: string): Promise<?string> {
-    const args = ['targets', '--show-output', aliasOrTarget];
+  async showOutput(aliasOrTarget: string): Promise<Array<Object>> {
+    const args = ['targets', '--json', '--show-output', aliasOrTarget];
     const result = await this._runBuckCommandFromProjectRoot(args);
-    const stdout = result.stdout.trim();
-    if (stdout.indexOf(' ') !== -1) {
-      const relativePath = stdout.split(' ')[1];
-      return nuclideUri.resolve(this._rootPath, relativePath);
-    } else {
-      return null;
-    }
+    return JSON.parse(result.stdout.trim());
   }
 
   async buildRuleTypeFor(aliasOrTarget: string): Promise<string> {

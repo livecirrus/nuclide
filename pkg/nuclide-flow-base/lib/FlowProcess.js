@@ -31,6 +31,7 @@ import {
   isFlowInstalled,
   getPathToFlow,
   getStopFlowOnExit,
+  getFlowExecOptions,
 } from './FlowHelpers';
 
 import {ServerStatus} from './FlowConstants';
@@ -146,9 +147,6 @@ export class FlowProcess {
         // try again
       }
     }
-    // otherwise flow complains
-    // eslint-disable-next-line no-unreachable
-    return null;
   }
 
   /** Starts a Flow server in the current root */
@@ -166,7 +164,7 @@ export class FlowProcess {
         '--max-workers', this._getMaxWorkers().toString(),
         this._root,
       ],
-      this._getFlowExecOptions(),
+      getFlowExecOptions(this._root),
     );
     const logIt = data => {
       const pid = serverProcess.pid;
@@ -197,8 +195,6 @@ export class FlowProcess {
       this._updateServerStatus(null);
       return null;
     }
-    const flowOptions = this._getFlowExecOptions();
-    options = {...flowOptions, ...options};
     args = [
       ...args,
       '--retry-if-init', 'false',
@@ -206,7 +202,7 @@ export class FlowProcess {
       '--no-auto-start',
     ];
     try {
-      const result = await FlowProcess.execFlowClient(args, options);
+      const result = await FlowProcess.execFlowClient(args, this._root, options);
       this._updateServerStatus(result);
       return result;
     } catch (e) {
@@ -250,7 +246,7 @@ export class FlowProcess {
           // server. So, don't update.
           return;
         default:
-          logger.error(`Unknown return code from Flow: ${result.exitCode}`);
+          logger.error(`Unknown return code from Flow: ${String(result.exitCode)}`);
           status = ServerStatus.UNKNOWN;
       }
     }
@@ -301,23 +297,6 @@ export class FlowProcess {
       .toPromise();
   }
 
-  /**
-  * If this returns null, then it is not safe to run flow.
-  */
-  _getFlowExecOptions(): {cwd: string} {
-    return {
-      cwd: this._root,
-      env: {
-        // Allows backtrace to be printed:
-        // http://caml.inria.fr/pub/docs/manual-ocaml/runtime.html#sec279
-        OCAMLRUNPARAM: 'b',
-        // Put this after so that if the user already has something set for OCAMLRUNPARAM we use
-        // that instead. They probably know what they're doing.
-        ...process.env,
-      },
-    };
-  }
-
   _getMaxWorkers(): number {
     return Math.max(os.cpus().length - 2, 1);
   }
@@ -334,12 +313,17 @@ export class FlowProcess {
    */
   static async execFlowClient(
     args: Array<any>,
+    root: string | null,
     options?: Object = {},
   ): Promise<?process$asyncExecuteRet> {
     args = [
       ...args,
       '--from', 'nuclide',
     ];
+    options = {
+      ...getFlowExecOptions(root),
+      ...options,
+    };
     const pathToFlow = getPathToFlow();
     const ret = await asyncExecute(pathToFlow, args, options);
     if (ret.exitCode !== 0) {

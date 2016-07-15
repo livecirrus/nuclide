@@ -15,6 +15,7 @@ import type {ProcessMessage} from './process-types';
 import child_process from 'child_process';
 import nuclideUri from '../nuclide-remote-uri';
 import {CompositeSubscription, observeStream, splitStream, takeWhileInclusive} from './stream';
+import {maybeToString} from './string';
 import {Observable} from 'rxjs';
 import {PromiseQueue} from './promise-executors';
 import {quote} from 'shell-quote';
@@ -134,6 +135,7 @@ function getPlatformPath(): Promise<string> {
         if (error) {
           reject(error);
         } else {
+          // $FlowFixMe (stdout is a Buffer, which does not have match)
           const match = stdout.match(DARWIN_PATH_HELPER_REGEXP);
           resolve((match && match.length > 1) ? match[1] : '');
         }
@@ -377,7 +379,7 @@ function _createProcessStream(
         .merge(throwOnError ? errors.flatMap(Observable.throw) : Observable.empty())
         .takeUntil(completion)
         .subscribe(observer),
-      () => { disposed = true; maybeKill(); },
+      (() => { disposed = true; maybeKill(); }: () => void),
     );
   });
   // TODO: We should really `.share()` this observable, but there seem to be issues with that and
@@ -609,10 +611,10 @@ export async function checkOutput(
   args: Array<string>,
   options: ?AsyncExecuteOptions = {},
 ): Promise<process$asyncExecuteRet> {
-  const result = await asyncExecute(command, args, options);
+  const result: process$asyncExecuteRet = await asyncExecute(command, args, options);
   if (result.exitCode !== 0) {
     const reason = result.exitCode != null ? `exitCode: ${result.exitCode}` :
-      `error: ${result.errorMessage}`;
+      `error: ${maybeToString(result.errorMessage)}`;
     throw new Error(
       `asyncExecute "${command}" failed with ${reason}, ` +
       `stderr: ${result.stderr}, stdout: ${result.stdout}.`

@@ -23,15 +23,12 @@ export default class SettingsSelect extends React.Component {
 
   constructor(props: Object) {
     super(props);
-    (this: any)._onChanged = this._onChanged.bind(this);
+    (this: any)._handleChange = this._handleChange.bind(this);
   }
 
-  _onChanged(event: SyntheticEvent) {
+  _handleChange(event: SyntheticEvent) {
     const value = ((event.target: any): HTMLInputElement).value;
-    this.props.onChanged({
-      keyPath: this.props.keyPath,
-      newValue: value,
-    });
+    this.props.onChange(value);
   }
 
   render(): React.Element<any> {
@@ -59,7 +56,7 @@ export default class SettingsSelect extends React.Component {
         <select
           className="form-control"
           id={id}
-          onChange={this._onChanged}
+          onChange={this._handleChange}
           value={value}>
           {optionElements}
         </select>

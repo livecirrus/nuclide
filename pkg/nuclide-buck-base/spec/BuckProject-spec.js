@@ -78,6 +78,19 @@ describe('BuckProject (test-project-with-failing-targets)', () => {
         throw new Error('promise should have been rejected');
       });
     });
+
+    it('respects extra arguments', () => {
+      waitsForPromise(async () => {
+        try {
+          await buckProject.build(['//:good_rule'], {extraArguments: ['--help']});
+        } catch (e) {
+          // The help option, naturally, lists itself.
+          expect(e.message).toContain('--help');
+          return;
+        }
+        throw new Error('promise should have been rejected');
+      });
+    });
   });
 
   describe('.resolveAlias(aliasOrTarget)', () => {
@@ -89,11 +102,12 @@ describe('BuckProject (test-project-with-failing-targets)', () => {
     });
   });
 
-  describe('.outputFileFor(aliasOrTarget)', () => {
-    it('returns the output file for a genrule()', () => {
+  describe('.showOutput(aliasOrTarget)', () => {
+    it('returns the output data for a genrule()', () => {
       waitsForPromise(async () => {
-        const outputFile = await buckProject.outputFileFor('good');
-        expect(outputFile).toBe(nuclideUri.join(projectDir, 'buck-out/gen/good_rule/good.txt'));
+        const output = await buckProject.showOutput('good');
+        expect(output.length).toBe(1);
+        expect(output[0]['buck.outputPath']).toBe('buck-out/gen/good_rule/good.txt');
       });
     });
   });

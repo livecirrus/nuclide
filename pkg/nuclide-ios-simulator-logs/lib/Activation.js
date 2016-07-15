@@ -12,6 +12,7 @@
 import type {OutputService} from '../../nuclide-console/lib/types';
 
 import formatEnoentNotification from '../../commons-atom/format-enoent-notification';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {LogTailer} from '../../nuclide-console/lib/LogTailer';
 import {createMessageStream} from './createMessageStream';
 import {createProcessStream} from './createProcessStream';
@@ -24,24 +25,27 @@ class Activation {
 
   constructor(state: ?Object) {
     const message$ = Rx.Observable.defer(() => createMessageStream(createProcessStream()))
-      .do({
-        error(err) {
-          if (err.code === 'ENOENT') {
-            const {message, meta} = formatEnoentNotification({
-              feature: 'iOS Syslog tailing',
-              toolName: 'syslog',
-              pathSetting: 'nuclide-ios-simulator-logs.pathToSyslog',
-            });
-            atom.notifications.addError(message, meta);
-          }
-        },
+      .catch(err => {
+        if (err.code === 'ENOENT') {
+          const {message, meta} = formatEnoentNotification({
+            feature: 'iOS Syslog tailing',
+            toolName: 'syslog',
+            pathSetting: 'nuclide-ios-simulator-logs.pathToSyslog',
+          });
+          atom.notifications.addError(message, meta);
+          return Rx.Observable.empty();
+        }
+        throw err;
       });
 
-    this._logTailer = new LogTailer(message$, {
-      start: 'ios-simulator-logs:start',
-      stop: 'ios-simulator-logs:stop',
-      restart: 'ios-simulator-logs:restart',
-      error: 'ios-simulator-logs:error',
+    this._logTailer = new LogTailer({
+      name: 'iOS Simultoar Logs',
+      messages: message$,
+      trackingEvents: {
+        start: 'ios-simulator-logs:start',
+        stop: 'ios-simulator-logs:stop',
+        restart: 'ios-simulator-logs:restart',
+      },
     });
 
     this._disposables = new CompositeDisposable(
@@ -54,11 +58,16 @@ class Activation {
     );
   }
 
-  consumeOutputService(api: OutputService): IDisposable {
-    return api.registerOutputProvider({
-      id: 'iOS Simulator Logs',
-      messages: this._logTailer.getMessages(),
-    });
+  consumeOutputService(api: OutputService): void {
+    this._disposables.add(
+      api.registerOutputProvider({
+        id: 'iOS Simulator Logs',
+        messages: this._logTailer.getMessages(),
+        observeStatus: cb => this._logTailer.observeStatus(cb),
+        start: () => { this._logTailer.start(); },
+        stop: () => { this._logTailer.stop(); },
+      })
+    );
   }
 
   dispose() {

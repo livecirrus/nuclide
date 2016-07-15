@@ -14,15 +14,17 @@ import type {Reference} from '../types';
 import {AtomInput} from '../../../nuclide-ui/lib/AtomInput';
 import {React} from 'react-for-atom';
 
-const FilePreview = React.createClass({
+type Props = {
+  text: string;
+  grammar: atom$Grammar;
+  references: Array<Reference>;
+  startLine: number;
+  endLine: number;
+  onClick: (event: SyntheticMouseEvent) => mixed;
+};
 
-  propTypes: {
-    text: React.PropTypes.string.isRequired,
-    grammar: React.PropTypes.object,
-    references: React.PropTypes.arrayOf(React.PropTypes.object /*Reference*/).isRequired,
-    startLine: React.PropTypes.number.isRequired,
-    endLine: React.PropTypes.number.isRequired,
-  },
+export default class FilePreview extends React.Component {
+  props: Props;
 
   componentDidMount() {
     const editor = this.refs.editor.getTextEditor();
@@ -45,7 +47,7 @@ const FilePreview = React.createClass({
       references[0].end.line - startLine,
       references[0].end.column - 1,
     ]);
-  },
+  }
 
   render(): React.Element<any> {
     const lineNumbers = [];
@@ -65,11 +67,10 @@ const FilePreview = React.createClass({
           ref="editor"
           initialValue={this.props.text}
           disabled={true}
+          onClick={this.props.onClick}
         />
       </div>
     );
-  },
+  }
 
-});
-
-module.exports = FilePreview;
+}

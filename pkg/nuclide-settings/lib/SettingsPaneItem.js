@@ -9,8 +9,6 @@
  * the root directory of this source tree.
  */
 
-import type {SettingsEvent} from './types';
-
 import {CompositeDisposable} from 'atom';
 import featureConfig from '../../nuclide-feature-config';
 import {React} from 'react-for-atom';
@@ -27,8 +25,8 @@ export default class NuclideSettingsPaneItem extends React.Component {
     super(props);
 
     // Bind callbacks first since we use these during config data generation.
-    (this: any)._onConfigChanged = this._onConfigChanged.bind(this);
-    (this: any)._onComponentChanged = this._onComponentChanged.bind(this);
+    (this: any)._handleConfigChange = this._handleConfigChange.bind(this);
+    (this: any)._handleComponentChange = this._handleComponentChange.bind(this);
 
     this.state = this._getConfigData();
   }
@@ -42,12 +40,12 @@ export default class NuclideSettingsPaneItem extends React.Component {
 
     const configData = {};
     const nuclidePackages =
-      atom.packages.getActivePackages().filter(pkg => pkg.metadata && pkg.metadata.nuclide);
+      atom.packages.getLoadedPackages().filter(pkg => pkg.metadata && pkg.metadata.nuclide);
 
     // Config data is organized as a series of nested objects. First, by category
     // and then by packages in each category. Each package contains a title and an
     // object for each setting in that package. Each setting also contains an
-    // onChanged callback for components. We also listen for atom.config.onDidChange.
+    // onChange callback for components. We also listen for atom.config.onDidChange.
     //
     // ```
     // configData = {
@@ -89,17 +87,19 @@ export default class NuclideSettingsPaneItem extends React.Component {
           const keyPath = pkgName + '.' + settingName;
           const schema = featureConfig.getSchema(keyPath);
           settings[settingName] = {
-            name: settingName,
-            description: getDescription(schema),
             keyPath,
-            onChanged: this._onComponentChanged,
-            order: getOrder(schema),
-            title: getTitle(schema, settingName),
             value: featureConfig.get(keyPath),
+            onChange: value => { this._handleComponentChange(keyPath, value); },
+            schema: {
+              ...schema,
+              description: getDescription(schema),
+              order: getOrder(schema),
+              title: getTitle(schema, settingName),
+            },
           };
 
           if (disposables) {
-            const disposable = featureConfig.onDidChange(keyPath, this._onConfigChanged);
+            const disposable = featureConfig.onDidChange(keyPath, this._handleConfigChange);
             this._disposables.add(disposable);
           }
         });
@@ -114,15 +114,15 @@ export default class NuclideSettingsPaneItem extends React.Component {
     return configData;
   }
 
-  _onConfigChanged(event: Object) {
+  _handleConfigChange(event: Object) {
     // Workaround: Defer this._getConfigData() as it registers new config.onDidChange() callbacks
     // The issue is that Atom invokes these new callbacks for the current onDidChange event,
     // instead of only for *future* events.
     setTimeout(() => this.setState(this._getConfigData()));
   }
 
-  _onComponentChanged(event: SettingsEvent) {
-    featureConfig.set(event.keyPath, event.newValue);
+  _handleComponentChange(keyPath: string, value: any): void {
+    featureConfig.set(keyPath, value);
   }
 
   render(): React.Element<any> {

@@ -10,7 +10,11 @@
  */
 
 import type DebuggerModel from './DebuggerModel';
-import type {Callstack} from './CallstackStore';
+import type {
+  Callstack,
+  EvaluationResult,
+  ExpansionResult,
+} from './types';
 
 type ExpressionResult = ChromeProtocolResponse & {
   expression: string;
@@ -24,20 +28,6 @@ type ChromeProtocolResponse = {
   result: ?EvaluationResult | ?GetPropertiesResult;
   error: ?Object;
 };
-
-export type EvaluationResult = {
-  _type: string;
-  // Either:
-  value?: string;
-  // Or:
-  _description? : string;
-  _objectId?: string;
-};
-
-export type ExpansionResult = Array<{
-  name: string;
-  value: EvaluationResult;
-}>;
 
 import invariant from 'assert';
 import {CompositeDisposable, Disposable} from 'atom';
@@ -240,6 +230,10 @@ class Bridge {
     this._debuggerModel.getActions().updateCallstack(callstack);
   }
 
+  _handleLocalsUpdate(locals: ExpansionResult): void {
+    this._debuggerModel.getActions().updateLocals(locals);
+  }
+
   _handleResponseForPendingRequest<T>(
     pending: Map<string, Deferred<?T>>,
     response: ChromeProtocolResponse,
@@ -309,6 +303,9 @@ class Bridge {
             break;
           case 'CallstackUpdate':
             this._handleCallstackUpdate(event.args[1]);
+            break;
+          case 'LocalsUpdate':
+            this._handleLocalsUpdate(event.args[1]);
             break;
         }
         break;

@@ -11,12 +11,10 @@
 
 import type {
   ExpansionResult,
-} from './Bridge';
+  EvaluatedExpression,
+  EvaluatedExpressionList,
+} from './types';
 import {WatchExpressionStore} from './WatchExpressionStore';
-import type {
-  WatchExpression,
-  WatchExpressionList,
-} from './WatchExpressionListStore';
 import type {Observable} from 'rxjs';
 
 import {
@@ -29,7 +27,7 @@ import {LazyNestedValueComponent} from '../../nuclide-ui/lib/LazyNestedValueComp
 import SimpleValueComponent from '../../nuclide-ui/lib/SimpleValueComponent';
 
 type WatchExpressionComponentProps = {
-  watchExpressions: WatchExpressionList;
+  watchExpressions: EvaluatedExpressionList;
   onAddWatchExpression: (expression: string) => void;
   onRemoveWatchExpression: (index: number) => void;
   onUpdateWatchExpression: (index: number, newExpression: string) => void;
@@ -114,7 +112,7 @@ export class WatchExpressionComponent extends React.Component {
 
   _renderExpression(
     fetchChildren: (objectId: string) => Observable<?ExpansionResult>,
-    watchExpression: WatchExpression,
+    watchExpression: EvaluatedExpression,
     index: number,
   ): React.Element<any> {
     const {
@@ -141,10 +139,13 @@ export class WatchExpressionComponent extends React.Component {
     );
     return (
       <div
-        className="nuclide-debugger-atom-watch-expression-row"
+        className={classnames(
+          'nuclide-debugger-atom-expression-value-row',
+          'nuclide-debugger-atom-watch-expression-row',
+        )}
         key={index}>
         <div
-          className="nuclide-debugger-atom-watch-expression-row-content"
+          className="nuclide-debugger-atom-expression-value-content"
           onDoubleClick={this._setRowBeingEdited.bind(this, index)}>
           <ValueComponent
             expression={expression}
@@ -180,7 +181,7 @@ export class WatchExpressionComponent extends React.Component {
       />
     );
     return (
-      <div className="nuclide-debugger-atom-watch-expression-list">
+      <div className="nuclide-debugger-atom-expression-value-list">
         {expressions}
         {addNewExpressionInput}
       </div>

@@ -122,6 +122,10 @@ export default class {
         'The file is empty or untracked or the repository cannot be reached.',
         error,
       );
+      atom.commands.dispatch(
+        atom.views.getView(this._editor),
+        'nuclide-blame:hide-blame',
+      );
       return;
     }
     // The BlameGutter could have been destroyed while blame was being fetched.
@@ -145,6 +149,7 @@ export default class {
       this._loadingSpinnerDiv = document.createElement('div');
       this._loadingSpinnerDiv.className = 'nuclide-blame-ui-spinner';
       const gutterView = atom.views.getView(this._gutter);
+      // $FlowFixMe
       gutterView.appendChild(this._loadingSpinnerDiv);
     }, MS_TO_WAIT_BEFORE_SPINNER);
   }

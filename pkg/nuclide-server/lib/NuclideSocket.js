@@ -15,15 +15,18 @@ import type {Observable} from 'rxjs';
 import url from 'url';
 import WS from 'ws';
 import uuid from 'uuid';
-import {EventEmitter} from 'events';
+import {Emitter} from 'event-kit';
 import {WebSocketTransport} from './WebSocketTransport';
 import {QueuedTransport} from './QueuedTransport';
 import {XhrConnectionHeartbeat} from './XhrConnectionHeartbeat';
 import invariant from 'assert';
 import {attachEvent} from '../../commons-node/event';
+import {maybeToString} from '../../commons-node/string';
 
 const logger = require('../../nuclide-logging').getLogger();
 
+const PING_SEND_INTERVAL = 5000;
+const PING_WAIT_INTERVAL = 5000;
 
 const INITIAL_RECONNECT_TIME_MS = 10;
 const MAX_RECONNECT_TIME_MS = 5000;
@@ -51,19 +54,21 @@ export class NuclideSocket {
 
   _serverUri: string;
   _options: ?AgentOptions;
+  _pingTimer: ?number;
   _reconnectTime: number;
   _reconnectTimer: ?number; // ID from a setTimeout() call.
   _previouslyConnected: boolean;
   _websocketUri: string;
-  _emitter: EventEmitter;
+  _emitter: Emitter;
   _transport: ?QueuedTransport;
   _heartbeat: XhrConnectionHeartbeat;
 
   constructor(serverUri: string, options: ?AgentOptions) {
-    this._emitter = new EventEmitter();
+    this._emitter = new Emitter();
     this._serverUri = serverUri;
     this._options = options;
     this.id = uuid.v4();
+    this._pingTimer = null;
     this._reconnectTime = INITIAL_RECONNECT_TIME_MS;
     this._reconnectTimer = null;
     this._previouslyConnected = false;
@@ -78,7 +83,8 @@ export class NuclideSocket {
     });
 
     const {protocol, host} = url.parse(serverUri);
-    this._websocketUri = `ws${protocol === 'https:' ? 's' : ''}://${host}`;
+    // TODO verify that `host` is non-null rather than using maybeToString
+    this._websocketUri = `ws${protocol === 'https:' ? 's' : ''}://${maybeToString(host)}`;
 
     this._heartbeat = new XhrConnectionHeartbeat(serverUri, options);
     this._heartbeat.onConnectionRestored(() => {
@@ -142,7 +148,17 @@ export class NuclideSocket {
         case 'success':
           if (this.isDisconnected()) {
             const ws = new WebSocketTransport(this.id, websocket);
+            const pingId = uuid.v4();
+            ws.onClose(() => { this._clearPingTimer(); });
             ws.onError(error => { ws.close(); });
+            ws.onPong(data => {
+              if (pingId === data) {
+                this._schedulePing(pingId, ws);
+              } else {
+                logger.error('pingId mismatch');
+              }
+            });
+            this._schedulePing(pingId, ws);
             invariant(this._transport != null);
             this._transport.reconnect(ws);
             websocket.removeListener('error', onSocketError);
@@ -161,6 +177,24 @@ export class NuclideSocket {
       }
     };
     websocket.on('open', onSocketOpen);
+  }
+
+  _schedulePing(data: string, ws: WebSocketTransport): void {
+    this._clearPingTimer();
+    this._pingTimer = setTimeout(() => {
+      ws.ping(data);
+      this._pingTimer = setTimeout(() => {
+        logger.error('Failed to receive pong in response to ping');
+        ws.close();
+      }, PING_WAIT_INTERVAL);
+    }, PING_SEND_INTERVAL);
+  }
+
+  _clearPingTimer() {
+    if (this._pingTimer != null) {
+      clearTimeout(this._pingTimer);
+      this._pingTimer = null;
+    }
   }
 
   _scheduleReconnect() {
@@ -237,19 +271,19 @@ export class NuclideSocket {
   }
 
   onStatus(callback: (connected: boolean) => mixed): IDisposable {
-    return attachEvent(this._emitter, 'status', callback);
+    return this._emitter.on('status', callback);
   }
 
   onConnect(callback: () => mixed): IDisposable {
-    return attachEvent(this._emitter, 'connect', callback);
+    return this._emitter.on('connect', callback);
   }
 
   onReconnect(callback: () => mixed): IDisposable {
-    return attachEvent(this._emitter, 'reconnect', callback);
+    return this._emitter.on('reconnect', callback);
   }
 
   onDisconnect(callback: () => mixed): IDisposable {
-    return attachEvent(this._emitter, 'disconnect', callback);
+    return this._emitter.on('disconnect', callback);
   }
 }
 

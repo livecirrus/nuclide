@@ -12,11 +12,12 @@
 
 import {FileTreeNode} from '../lib/FileTreeNode';
 import Immutable from 'immutable';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {WorkingSet} from '../../nuclide-working-sets';
 
 
 const CONF = {
-  vcsStatuses: {},
+  vcsStatuses: new Immutable.Map(),
   workingSet: new WorkingSet(),
   editedWorkingSet: new WorkingSet(),
   hideIgnoredNames: true,
@@ -82,7 +83,6 @@ describe('FileTreeNode', () => {
 
     // Derived
     expect(node.name).toBe('ghi');
-    expect(node.hashKey).toBeTruthy();
     expect(node.relativePath).toBe('def/ghi');
     expect(node.localPath).toBe('/abc/def/ghi');
     expect(node.isContainer).toBe(false);

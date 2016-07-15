@@ -11,7 +11,9 @@
 
 import type {
   EvaluationResult,
-} from './Bridge';
+  Expression,
+  EvaluatedExpressionList,
+} from './types';
 import type {WatchExpressionStore} from './WatchExpressionStore';
 import type {Dispatcher} from 'flux';
 
@@ -22,20 +24,13 @@ import {
 import Rx from 'rxjs';
 import Constants from './Constants';
 
-type Expression = string;
-export type WatchExpression = {
-  expression: Expression;
-  value: Rx.Observable<?EvaluationResult>;
-};
-export type WatchExpressionList = Array<WatchExpression>;
-
 export class WatchExpressionListStore {
   _watchExpressionStore: WatchExpressionStore;
   _disposables: IDisposable;
   /**
-   * Treat the underlying WatchExpressionList as immutable.
+   * Treat the underlying EvaluatedExpressionList as immutable.
    */
-  _watchExpressions: Rx.BehaviorSubject<WatchExpressionList>;
+  _watchExpressions: Rx.BehaviorSubject<EvaluatedExpressionList>;
 
   constructor(watchExpressionStore: WatchExpressionStore, dispatcher: Dispatcher) {
     this._watchExpressionStore = watchExpressionStore;
@@ -74,7 +69,7 @@ export class WatchExpressionListStore {
     };
   }
 
-  getWatchExpressions(): Rx.Observable<WatchExpressionList> {
+  getWatchExpressions(): Rx.Observable<EvaluatedExpressionList> {
     return this._watchExpressions.asObservable();
   }
 

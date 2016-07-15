@@ -9,6 +9,8 @@
  * the root directory of this source tree.
  */
 
+import invariant from 'assert';
+
 import {
   busySignal,
   copyFixture,
@@ -101,7 +103,9 @@ describeRemotableTest('Clang Integration Test (C++)', context => {
       const errors = atom.views.getView(atom.workspace)
         .querySelector('.nuclide-diagnostics-highlight-group > :first-child');
       if (errors instanceof HTMLElement) {
-        return errors.innerText.trim() === '1';
+        const innerText = errors.innerText;
+        invariant(innerText != null);
+        return innerText.trim() === '1';
       }
     });
 
@@ -149,6 +153,7 @@ describeRemotableTest('Clang Integration Test (C++)', context => {
     });
 
     runs(() => {
+      // $FlowFixMe
       expect(datatip.getModel().getText()).toBe('TestClass<int>');
 
       // Hyperclick on TestClass

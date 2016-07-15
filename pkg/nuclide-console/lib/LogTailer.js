@@ -9,16 +9,36 @@
  * the root directory of this source tree.
  */
 
-import type {Message} from './types';
+import type {Message, OutputProviderStatus} from './types';
+import type {ConnectableObservable} from 'rxjs';
 
+import {DisposableSubscription} from '../../commons-node/stream';
 import {track} from '../../nuclide-analytics';
-import Rx from 'rxjs';
+import {getLogger} from '../../nuclide-logging';
+import {BehaviorSubject, Observable, Subscription} from 'rxjs';
 
-type EventNames = {
+type TrackingEventNames = {
   start: string;
   stop: string;
   restart: string;
-  error: string;
+};
+
+type Options = {
+  name: string;
+  messages: Observable<Message>;
+  trackingEvents: TrackingEventNames;
+
+  // Signals that the source is ready ("running"). This allows us to account for sources that need
+  // some initialization without having to worry about it in cases that don't.
+  ready?: Observable<void>;
+};
+
+type StartOptions = {
+  // A node-style error-first callback. This API is used because: Atom commands don't let us return
+  // values (an Observable or Promise would work well here) and we want to have success and error
+  // messages use the same channel (instead of a separate `onRunning` and `onRunningError`
+  // callback).
+  onRunning: (err?: Error) => mixed;
 };
 
 /**
@@ -26,21 +46,49 @@ type EventNames = {
  * handle the rest.
  */
 export class LogTailer {
-  _eventNames: EventNames;
+  _name: string;
+  _eventNames: TrackingEventNames;
   _subscription: ?rx$ISubscription;
-  _input$: Rx.Observable<Message>;
-  _message$: Rx.Subject<Message>;
-  _running: boolean;
+  _messages: ConnectableObservable<Message>;
+  _ready: ?Observable<void>;
+  _statuses: BehaviorSubject<OutputProviderStatus>;
 
-  constructor(input$: Rx.Observable<Message>, eventNames: EventNames) {
-    this._input$ = input$;
-    this._eventNames = eventNames;
-    this._message$ = new Rx.Subject();
-    this._running = false;
+  constructor(options: Options) {
+    this._name = options.name;
+    this._eventNames = options.trackingEvents;
+    this._ready = options.ready;
+    this._messages = options.messages
+      .do({
+        complete: () => {
+          this._stop();
+        },
+      })
+      .catch(err => {
+        this._stop(false);
+        getLogger().error(`Error with ${this._name} tailer.`, err);
+        const message = `An unexpected error occurred while running the ${this._name} process`
+          + (err.message ? `:\n\n**${err.message}**` : '.');
+        const notification = atom.notifications.addError(message, {
+          dismissable: true,
+          detail: err.stack == null ? '' : err.stack.toString(),
+          buttons: [{
+            text: `Restart ${this._name}`,
+            className: 'icon icon-sync',
+            onDidClick: () => {
+              notification.dismiss();
+              this.restart();
+            },
+          }],
+        });
+        return Observable.empty();
+      })
+      .share()
+      .publish();
+    this._statuses = new BehaviorSubject('stopped');
   }
 
-  start(): void {
-    this._start();
+  start(options?: StartOptions): void {
+    this._start(true, options);
   }
 
   stop(): void {
@@ -53,48 +101,93 @@ export class LogTailer {
     this._start(false);
   }
 
-  _start(trackCall: boolean = true): void {
+  observeStatus(cb: (status: 'starting' | 'running' | 'stopped') => void): IDisposable {
+    return new DisposableSubscription(this._statuses.subscribe(cb));
+  }
+
+  _start(trackCall: boolean, options?: StartOptions): void {
     atom.commands.dispatch(atom.views.getView(atom.workspace), 'nuclide-console:show');
 
-    if (this._running) {
-      return;
-    }
-    if (trackCall) {
-      track(this._eventNames.start);
+    const shouldRun = this._statuses.getValue() === 'stopped';
+
+    if (shouldRun) {
+      if (trackCall) {
+        track(this._eventNames.start);
+      }
+
+      // If the LogTailer was created with a way of detecting when the source was ready, the initial
+      // status is "starting." Otherwise, assume that it's started immediately.
+      const initialStatus = this._ready == null ? 'running' : 'starting';
+      this._statuses.next(initialStatus);
     }
 
-    this._running = true;
+    // If the user provided an `onRunning` callback, hook it up.
+    if (options != null) {
+      const {onRunning} = options;
+      Observable.merge(
+        this._statuses,
+        this._messages.ignoreElements(), // For the errors
+      )
+        .takeWhile(status => status !== 'stopped')
+        .first(status => status === 'running')
+        .catch(err => {
+          // If it's stopped before it starts running, emit a special error.
+          if (err.name === 'EmptyError') { throw new ProcessCancelledError(this._name); }
+          throw err;
+        })
+        .mapTo(undefined)
+        .subscribe(
+          () => { onRunning(); },
+          err => { onRunning(err); },
+        );
+    }
+
+    if (!shouldRun) {
+      return;
+    }
 
     if (this._subscription != null) {
       this._subscription.unsubscribe();
     }
 
-    this._subscription = this._input$.subscribe(
-      message => { this._message$.next(message); },
-      err => {
-        this._stop(false);
-        track(this._eventNames.error, {message: err.message});
-      }
-    );
+    const sub = new Subscription();
+
+    if (this._ready != null) {
+      sub.add(
+        this._ready
+          .takeUntil(this._statuses.filter(status => status !== 'starting'))
+          .subscribe(() => { this._statuses.next('running'); })
+      );
+    }
+
+    sub.add(this._messages.connect());
+    this._subscription = sub;
   }
 
   _stop(trackCall: boolean = true): void {
-    if (!this._running) {
+    if (this._subscription != null) {
+      this._subscription.unsubscribe();
+    }
+
+    if (this._statuses.getValue() === 'stopped') {
       return;
     }
     if (trackCall) {
       track(this._eventNames.stop);
     }
 
-    this._running = false;
-
-    if (this._subscription != null) {
-      this._subscription.unsubscribe();
-    }
+    this._statuses.next('stopped');
   }
 
-  getMessages(): Rx.Observable<Message> {
-    return this._message$.asObservable();
+  getMessages(): Observable<Message> {
+    return this._messages;
   }
 
+}
+
+class ProcessCancelledError extends Error {
+  constructor(logProducerName: string) {
+    super(`${logProducerName} was stopped`);
+    this.name = 'ProcessCancelledError';
+  }
 }

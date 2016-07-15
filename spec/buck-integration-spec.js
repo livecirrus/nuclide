@@ -10,7 +10,8 @@
  */
 
 import {sleep} from '../pkg/commons-node/promise';
-import {_getCommands} from '../pkg/nuclide-build';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
+import activation from '../pkg/nuclide-task-runner';
 import {
   activateAllPackages,
   copyFixture,
@@ -48,22 +49,26 @@ describe('Buck building via toolbar', () => {
       await atom.workspace.open(nuclideUri.join(projectPath, '.buckconfig'));
     });
 
+    runs(() => {
+      // Select the Buck build system.
+      const commands = activation._getCommands();
+      invariant(commands != null);
+      commands.selectTask({taskRunnerId: 'buck', type: 'build'});
+    });
+
     waitsFor(
       'the toolbar to be shown',
       10,
       () => {
-        atom.commands.dispatch(workspaceView, 'nuclide-build:toggle-toolbar-visibility');
-        buildToolbar = document.querySelector('.nuclide-build-toolbar');
+        atom.commands.dispatch(
+          workspaceView,
+          'nuclide-task-runner:toggle-toolbar-visibility',
+          {visible: true},
+        );
+        buildToolbar = document.querySelector('.nuclide-task-runner-toolbar');
         return Boolean(buildToolbar);
       },
     );
-
-    runs(() => {
-      // Select the Buck build system.
-      const commands = _getCommands();
-      invariant(commands != null);
-      commands.selectBuildSystem('buck');
-    });
 
     let combobox: HTMLElement;
     waitsFor(
@@ -115,11 +120,11 @@ describe('Buck building via toolbar', () => {
       await sleep(1000);
 
       // Run the project
-      atom.commands.dispatch(workspaceView, 'nuclide-build:build');
+      atom.commands.dispatch(workspaceView, 'nuclide-task-runner:build');
 
       // The Build task should be selected.
       const button = buildToolbar.querySelector(
-        '.nuclide-build-toolbar-contents .nuclide-ui-split-button-dropdown button'
+        '.nuclide-task-runner-toolbar-contents .nuclide-ui-split-button-dropdown button'
       );
       expect(button.textContent).toBe('Build');
     });
@@ -141,7 +146,9 @@ describe('Buck building via toolbar', () => {
         const consoleOutput = workspaceView.querySelectorAll('.nuclide-console-record pre');
         if (consoleOutput.length > 0) {
           const lastOutput = consoleOutput[consoleOutput.length - 1];
-          return lastOutput.innerText.indexOf('Buck exited') !== -1;
+          const innerText = lastOutput.innerText;
+          invariant(innerText != null);
+          return innerText.indexOf('Buck exited') !== -1;
         }
         return true;
       },

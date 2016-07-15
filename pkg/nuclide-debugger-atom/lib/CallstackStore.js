@@ -10,28 +10,19 @@
  */
 
 import type {Dispatcher} from 'flux';
+import type {Callstack} from './types';
 
 import {
   Disposable,
   CompositeDisposable,
+  Emitter,
 } from 'atom';
-import {EventEmitter} from 'events';
-import remoteUri from '../../nuclide-remote-uri';
+import nuclideUri from '../../nuclide-remote-uri';
 import Constants from './Constants';
-
-type CallstackItem = {
-  name: string;
-  location: {
-    path: string;
-    line: number;
-    column?: number;
-  };
-};
-export type Callstack = Array<CallstackItem>;
 
 export default class CallstackStore {
   _disposables: IDisposable;
-  _eventEmitter: EventEmitter;
+  _emitter: Emitter;
   _callstack: ?Callstack;
   _selectedCallFrameMarker: ?atom$Marker;
 
@@ -44,7 +35,7 @@ export default class CallstackStore {
     );
     this._callstack = null;
     this._selectedCallFrameMarker = null;
-    this._eventEmitter = new EventEmitter();
+    this._emitter = new Emitter();
   }
 
   _handlePayload(payload: Object) {
@@ -68,11 +59,11 @@ export default class CallstackStore {
 
   _updateCallstack(callstack: Callstack): void {
     this._callstack = callstack;
-    this._eventEmitter.emit('change');
+    this._emitter.emit('change');
   }
 
   _openSourceLocation(sourceURL: string, lineNumber: number): void {
-    const path = remoteUri.uriToNuclideUri(sourceURL);
+    const path = nuclideUri.uriToNuclideUri(sourceURL);
     if (path != null && atom.workspace != null) { // only handle real files for now.
       atom.workspace.open(path, {searchAllPanes: true}).then(editor => {
         editor.scrollToBufferPosition([lineNumber, 0]);
@@ -87,7 +78,7 @@ export default class CallstackStore {
 
   _setSelectedCallFrameLine(options: ?{sourceURL: string; lineNumber: number}) {
     if (options) {
-      const path = remoteUri.uriToNuclideUri(options.sourceURL);
+      const path = nuclideUri.uriToNuclideUri(options.sourceURL);
       const {lineNumber} = options;
       if (path != null && atom.workspace != null) { // only handle real files for now
         atom.workspace.open(path, {searchAllPanes: true}).then(editor => {
@@ -118,10 +109,8 @@ export default class CallstackStore {
     }
   }
 
-  onChange(callback: () => void): Disposable {
-    const emitter = this._eventEmitter;
-    this._eventEmitter.on('change', callback);
-    return new Disposable(() => emitter.removeListener('change', callback));
+  onChange(callback: () => void): IDisposable {
+    return this._emitter.on('change', callback);
   }
 
   getCallstack(): ?Callstack {

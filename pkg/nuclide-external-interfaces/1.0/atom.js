@@ -16,6 +16,7 @@
 
 declare class atom$Model {
   destroy(): void;
+  isDestroyed(): boolean;
 }
 
 declare class atom$Package {
@@ -176,7 +177,12 @@ declare class atom$Emitter {
   dispose(): void;
   on(name: string, callback: (v: any) => mixed): IDisposable;
   preempt(name: string, callback: (v: any) => void): IDisposable;
-  emit(name: string, value: any): IDisposable;
+  // This is a flow hack to prevent emitting more than one value.
+  // `EventEmitter` allows emitting any number of values - making this a land
+  // mine, since we tend to think of `emit` as interchangeable.
+  // This hack only works if the extra value is not `undefined`, so this isn't
+  // full-proof, but it works for most cases.
+  emit(name: string, value: any, ...no_extra_args_allowed: Array<void>): IDisposable;
 }
 
 declare class atom$Gutter {
@@ -267,6 +273,7 @@ declare class atom$PackageManager {
   loadPackages(): void;
   serviceHub: atom$ServiceHub;
   packageDirPaths: Array<string>;
+  triggerDeferredActivationHooks(): void;
   unloadPackage(name: string): void;
   unloadPackages(): void;
 }
@@ -459,6 +466,8 @@ declare class atom$ThemeManager {
   requireStylesheet(stylesheetPath: string): IDisposable;
 }
 
+type atom$TooltipsPlacementOption = 'top' | 'bottom' | 'left' | 'right' | 'auto';
+
 type atom$TooltipsAddOptions = {
   title: string;
   keyBindingCommand?: string;
@@ -466,7 +475,7 @@ type atom$TooltipsAddOptions = {
   animation?: boolean;
   container?: string | false;
   delay?: number | {show: number; hide: number};
-  placement?: 'top' | 'bottom' | 'left' | 'right' | 'auto';
+  placement?: atom$TooltipsPlacementOption | () => atom$TooltipsPlacementOption;
 };
 
 declare class atom$TooltipManager {
@@ -1274,6 +1283,7 @@ declare class atom$TextBuffer {
   updateCachedDiskContents(flushCache?: boolean, callback?: () => mixed): Promise<void>;
   emitModifiedStatusChanged(changed: boolean): void;
   destroy(): void;
+  isDestroyed(): boolean;
 }
 
 declare class atom$Notification {
@@ -1288,16 +1298,30 @@ declare class atom$Notification {
   dismiss(): void;
 }
 
+type atom$NotificationButton = {
+  text: string;
+  className?: string;
+  onDidClick?: () => mixed;
+};
+
+type atom$NotificationOptions = {
+  detail?: string;
+  dismissable?: boolean;
+  description?: string;
+  icon?: string;
+  buttons?: Array<atom$NotificationButton>;
+};
+
 declare class atom$NotificationManager {
   // Events
   onDidAddNotification(callback: (notification: atom$Notification) => void): IDisposable;
 
   // Adding Notifications
-  addSuccess(message: string, options?: Object): atom$Notification;
-  addInfo(message: string, options?: Object): atom$Notification;
-  addWarning(message: string, options?: Object): atom$Notification;
-  addError(message: string, options?: Object): atom$Notification;
-  addFatalError(message: string, options?: Object): atom$Notification;
+  addSuccess(message: string, options?: atom$NotificationOptions): atom$Notification;
+  addInfo(message: string, options?: atom$NotificationOptions): atom$Notification;
+  addWarning(message: string, options?: atom$NotificationOptions): atom$Notification;
+  addError(message: string, options?: atom$NotificationOptions): atom$Notification;
+  addFatalError(message: string, options?: atom$NotificationOptions): atom$Notification;
 
   // Getting Notifications
   getNotifications(): Array<atom$Notification>;
@@ -1456,6 +1480,9 @@ declare class atom$Repository {
   // Checking Out
   checkoutHead: (aPath: string) => boolean;
   checkoutReference: (reference: string, create: boolean) => boolean;
+
+  // Event Subscription
+  onDidDestroy(callback: () => mixed): IDisposable;
 }
 
 // Taken from the interface of [`GitRepositoryAsync`][1], which is also implemented by Nuclide's
@@ -1483,6 +1510,9 @@ declare class atom$RepositoryAsync {
 
   // Checking Out
   checkoutReference: (reference: string, create: boolean) => Promise<void>;
+
+  // Event Subscription
+  onDidDestroy(callback: () => mixed): IDisposable;
 }
 
 // One of text or snippet is required.

@@ -49,7 +49,13 @@ const SINGLE_LETTER_CLANG_FLAGS_THAT_TAKE_PATHS = new Set(
 const INCLUDE_SEARCH_TIMEOUT = 15000;
 
 export type ClangFlags = {
-  flags: ?Array<string>;
+  // Will be computed and memoized from rawData on demand.
+  flags?: ?Array<string>;
+  rawData: ?{
+    flags: Array<string>;
+    file: string;
+    directory: string;
+  };
   // Emits file change events for the underlying flags file.
   // (rename, change)
   changes: Observable<string>;
@@ -74,6 +80,7 @@ function overrideIncludePath(src: string): string {
 
 class ClangFlagsManager {
   _cachedBuckProjects: Map<string, BuckProject>;
+  _cachedBuckFlags: Map<string, Promise<Map<string, ClangFlags>>>;
   _compilationDatabases: Set<string>;
   _realpathCache: Object;
   _pathToFlags: Map<string, Promise<?ClangFlags>>;
@@ -86,6 +93,7 @@ class ClangFlagsManager {
   constructor() {
     this._pathToFlags = new Map();
     this._cachedBuckProjects = new Map();
+    this._cachedBuckFlags = new Map();
     this._compilationDatabases = new Set();
     this._realpathCache = {};
     this._flagFileObservables = new Map();
@@ -96,6 +104,7 @@ class ClangFlagsManager {
   reset() {
     this._pathToFlags.clear();
     this._cachedBuckProjects.clear();
+    this._cachedBuckFlags.clear();
     this._compilationDatabases.clear();
     this._realpathCache = {};
     this._flagFileObservables.clear();
@@ -137,23 +146,37 @@ class ClangFlagsManager {
    *     about the src file. For example, null will be returned if src is not
    *     under the project root.
    */
-  async getFlagsForSrc(src: string): Promise<?ClangFlags> {
-    let cached = this._pathToFlags.get(src);
-    if (cached != null) {
-      return cached;
+  async getFlagsForSrc(src: string): Promise<?Array<string>> {
+    const data = await this._getFlagsForSrcCached(src);
+    if (data == null) {
+      return null;
     }
-    cached = this._getFlagsForSrcImpl(src);
-    this._pathToFlags.set(src, cached);
-    const flags = await cached;
-    if (flags != null) {
-      this._subscriptions.push(flags.changes.subscribe({
+    if (data.flags === undefined) {
+      const {rawData} = data;
+      data.flags = rawData == null ? null :
+        ClangFlagsManager.sanitizeCommand(
+          rawData.file,
+          rawData.flags,
+          rawData.directory,
+        );
+      // Subscribe to changes.
+      this._subscriptions.push(data.changes.subscribe({
         next: change => {
           this._flagsChanged.add(src);
         },
         error: () => {},
       }));
     }
-    return flags;
+    return data.flags;
+  }
+
+  async _getFlagsForSrcCached(src: string): Promise<?ClangFlags> {
+    let cached = this._pathToFlags.get(src);
+    if (cached == null) {
+      cached = this._getFlagsForSrcImpl(src);
+      this._pathToFlags.set(src, cached);
+    }
+    return cached;
   }
 
   @trackTiming('nuclide-clang.get-flags')
@@ -186,7 +209,7 @@ class ClangFlagsManager {
       }
       const sourceFile = await ClangFlagsManager._findSourceFileForHeader(src, projectRoot);
       if (sourceFile != null) {
-        return this.getFlagsForSrc(sourceFile);
+        return this._getFlagsForSrcCached(sourceFile);
       }
     }
 
@@ -199,7 +222,7 @@ class ClangFlagsManager {
     const buildFile = await ClangFlagsManager._guessBuildFile(src);
     if (buildFile != null) {
       return {
-        flags: null,
+        rawData: null,
         changes: this._watchFlagFile(buildFile),
       };
     }
@@ -226,7 +249,11 @@ class ClangFlagsManager {
         if (await fsPromise.exists(filename)) {
           const realpath = await fsPromise.realpath(filename, this._realpathCache);
           const result = {
-            flags: ClangFlagsManager.sanitizeCommand(file, args, directory),
+            rawData: {
+              flags: args,
+              file,
+              directory,
+            },
             changes,
           };
           flags.set(realpath, result);
@@ -241,19 +268,34 @@ class ClangFlagsManager {
   }
 
   async _loadFlagsFromBuck(src: string): Promise<Map<string, ClangFlags>> {
-    const flags = new Map();
     const buckProject = await this._getBuckProject(src);
     if (!buckProject) {
-      return flags;
+      return new Map();
     }
 
     const target = (await buckProject.getOwner(src))
       .find(x => x.indexOf(DEFAULT_HEADERS_TARGET) === -1);
 
     if (target == null) {
-      return flags;
+      return new Map();
     }
 
+    const buckProjectRoot = await buckProject.getPath();
+    const key = buckProjectRoot + ':' + target;
+    let cached = this._cachedBuckFlags.get(key);
+    if (cached != null) {
+      return cached;
+    }
+    cached = this._loadFlagsForBuckTarget(buckProject, buckProjectRoot, target);
+    this._cachedBuckFlags.set(key, cached);
+    return cached;
+  }
+
+  async _loadFlagsForBuckTarget(
+    buckProject: BuckProject,
+    buckProjectRoot: string,
+    target: string,
+  ): Promise<Map<string, ClangFlags>> {
     // TODO(mbolin): The architecture should be chosen from a dropdown menu like
     // it is in Xcode rather than hardcoding things to iphonesimulator-x86_64.
     let arch;
@@ -275,26 +317,27 @@ class ClangFlagsManager {
       logger.error(error);
       throw error;
     }
-    const buckProjectRoot = await buckProject.getPath();
     let pathToCompilationDatabase = buildReport.results[buildTarget].output;
     pathToCompilationDatabase = nuclideUri.join(
-        buckProjectRoot,
-        pathToCompilationDatabase);
+      buckProjectRoot,
+      pathToCompilationDatabase,
+    );
 
-    const compilationDatabaseJsonBuffer = await fsPromise.readFile(pathToCompilationDatabase);
-    const compilationDatabaseJson = compilationDatabaseJsonBuffer.toString('utf8');
-    const compilationDatabase = JSON.parse(compilationDatabaseJson);
+    const compilationDatabase = JSON.parse(
+      await fsPromise.readFile(pathToCompilationDatabase, 'utf8')
+    );
 
+    const flags = new Map();
     const buildFile = await buckProject.getBuildFile(target);
     const changes = buildFile == null ? Observable.empty() : this._watchFlagFile(buildFile);
     compilationDatabase.forEach(item => {
       const {file} = item;
       const result = {
-        flags: ClangFlagsManager.sanitizeCommand(
+        rawData: {
+          flags: item.arguments,
           file,
-          item.arguments,
-          buckProjectRoot,
-        ),
+          directory: buckProjectRoot,
+        },
         changes,
       };
       flags.set(file, result);

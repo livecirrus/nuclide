@@ -10,24 +10,27 @@
  */
 
 import type {NuclideUri} from '../../nuclide-remote-uri';
-import typeof * as HackService from '../../nuclide-hack-base/lib/HackService';
+import type {
+  HackParameterDetails,
+  HackCompletion,
+  HackRange,
+} from '../../nuclide-hack-base/lib/rpc-types';
 import type {
   HackDiagnostic,
   HackReference,
   HackIdeOutline,
+  HackDefinition,
 } from '../../nuclide-hack-base/lib/HackService';
+import typeof * as HackService from '../../nuclide-hack-base/lib/HackService';
 import type {HackCoverageResult} from './TypedRegions';
 
-import {ServerHackLanguage} from './ServerHackLanguage';
-import {ServerConnection, RemoteConnection} from '../../nuclide-remote-connection';
+import {RemoteConnection} from '../../nuclide-remote-connection';
 import nuclideUri from '../../nuclide-remote-uri';
 import {getHackEnvironmentDetails} from './utils';
-
-export type CompletionResult = {
-  matchSnippet: string;
-  matchText: string;
-  matchType: string;
-};
+import {Range} from 'atom';
+import {getLogger} from '../../nuclide-logging';
+import {convertTypedRegionsToCoverageResult} from './TypedRegions';
+import invariant from 'assert';
 
 export type DefinitionResult = {
   path: NuclideUri;
@@ -51,82 +54,251 @@ export type Definition = {
 };
 
 /**
- * The HackLanguage is the controller that servers language requests by trying to get worker results
- * and/or results from HackService (which would be executing hh_client on a supporting server)
- * and combining and/or selecting the results to give back to the requester.
+ * Serves language requests from HackService.
+ * Note that all line/column values are 1 based.
  */
-export type HackLanguage = {
+export class HackLanguage {
 
-  dispose(): void;
+  _hackService: HackService;
+  _hhAvailable: boolean;
+  _basePath: ?string;
 
-  getCompletions(
+  /**
+   * `basePath` should be the directory where the .hhconfig file is located.
+   */
+  constructor(hackService: HackService, hhAvailable: boolean, basePath: ?string) {
+    this._hackService = hackService;
+    this._hhAvailable = hhAvailable;
+    this._basePath = basePath;
+  }
+
+  dispose() {
+  }
+
+  async getCompletions(
     filePath: NuclideUri,
     contents: string,
-    offset: number
-  ): Promise<Array<CompletionResult>>;
+    offset: number,
+    line: number,
+    column: number,
+  ): Promise<Array<atom$AutocompleteSuggestion>> {
+    const completions = await this._hackService.getCompletions(
+      filePath, contents, offset, line, column);
+    if (completions == null) {
+      return [];
+    }
+    return processCompletions(completions, contents, offset);
+  }
 
-  formatSource(
+  async formatSource(
     contents: string,
     startPosition: number,
     endPosition: number,
-  ): Promise<string>;
+  ): Promise<string> {
+    const path = this._basePath;
+    if (path == null) {
+      throw new Error('No Hack provider for this file.');
+    }
+    const response =
+      await this._hackService.formatSource(path, contents, startPosition, endPosition);
+    if (response == null) {
+      throw new Error('Error formatting hack source.');
+    } else if (response.error_message !== '') {
+      throw new Error(`Error formatting hack source: ${response.error_message}`);
+    }
+    return response.result;
+  }
 
-  highlightSource(
-    path: NuclideUri,
+  async highlightSource(
+    filePath: NuclideUri,
     contents: string,
     line: number,
     col: number,
-  ): Promise<Array<atom$Range>>;
+  ): Promise<Array<atom$Range>> {
+    const response = await this._hackService.getSourceHighlights(filePath, contents, line, col);
+    if (response == null) {
+      return [];
+    }
+    return response.map(hackRangeToAtomRange);
+  }
 
-  getDiagnostics(
-    path: NuclideUri,
-    contents: string,
-  ): Promise<Array<{message: HackDiagnostic;}>>;
-
-  getTypeCoverage(
+  async getDiagnostics(
     filePath: NuclideUri,
-  ): Promise<?HackCoverageResult>;
+    contents: string,
+  ): Promise<Array<{message: HackDiagnostic;}>> {
+    try {
+      const result = await this._hackService.getDiagnostics(filePath, contents);
+      if (result == null) {
+        getLogger().error('hh_client could not be reached');
+        return [];
+      }
+      return result;
+    } catch (err) {
+      getLogger().error(err);
+      return [];
+    }
+  }
 
-  getDefinition(
-      filePath: NuclideUri,
-      contents: string,
-      lineNumber: number,
-      column: number,
-      lineText: string
-    ): Promise<Array<DefinitionResult>>;
+  async getTypeCoverage(
+    filePath: NuclideUri,
+  ): Promise<?HackCoverageResult> {
+    const regions = await this._hackService.getTypedRegions(filePath);
+    return convertTypedRegionsToCoverageResult(regions);
+  }
 
-  getIdeDefinition(
-      filePath: NuclideUri,
-      contents: string,
-      lineNumber: number,
-      column: number
-    ): Promise<Array<Definition>>;
+  getIdeOutline(
+    filePath: NuclideUri,
+    contents: string,
+  ): Promise<?HackIdeOutline> {
+    return this._hackService.getIdeOutline(filePath, contents);
+  }
 
-  getType(
+  async getIdeDefinition(
+    filePath: NuclideUri,
+    contents: string,
+    lineNumber: number,
+    column: number,
+  ): Promise<Array<Definition>> {
+    const definitions =
+      await this._hackService.getDefinition(filePath, contents, lineNumber, column);
+    if (definitions == null) {
+      return [];
+    }
+    function convertDefinition(def: HackDefinition): Definition {
+      invariant(def.definition_pos != null);
+      return {
+        name: def.name,
+        path: def.definition_pos.filename,
+        line: def.definition_pos.line,
+        column: def.definition_pos.char_start,
+        queryRange: hackRangeToAtomRange(def.pos),
+      };
+    }
+    return definitions.filter(definition => definition.definition_pos != null)
+      .map(convertDefinition);
+  }
+
+  async getType(
     filePath: NuclideUri,
     contents: string,
     expression: string,
     lineNumber: number,
     column: number,
-  ): Promise<?string>;
+  ): Promise<?string> {
+    if (!expression.startsWith('$')) {
+      return null;
+    }
+    const result = await this._hackService.getTypeAtPos(filePath, contents, lineNumber, column);
+    return result == null ? null : result.type;
+  }
 
-  findReferences(
+  async findReferences(
     filePath: NuclideUri,
     contents: string,
     line: number,
-    column: number
-  ): Promise<?{baseUri: string; symbolName: string; references: Array<HackReference>}>;
+    column: number,
+  ): Promise<?{baseUri: string; symbolName: string; references: Array<HackReference>}> {
+    const references =
+      await this._hackService.findReferences(filePath, contents, line, column);
+    if (references == null || references.length === 0) {
+      return null;
+    }
+    invariant(this._basePath != null);
+    return {baseUri: this._basePath, symbolName: references[0].name, references};
+  }
 
-  getIdeOutline(
-    filePath: NuclideUri,
-    contents: string,
-  ): Promise<?HackIdeOutline>;
+  getBasePath(): ?string {
+    return this._basePath;
+  }
 
-  getBasePath(): ?string;
+  isHackAvailable(): boolean {
+    return this._hhAvailable;
+  }
+}
 
-  isHackAvailable(): boolean;
+function hackRangeToAtomRange(position: HackRange): atom$Range {
+  return new Range(
+        [position.line - 1, position.char_start - 1],
+        [position.line - 1, position.char_end],
+      );
+}
 
-};
+function matchTypeOfType(type: string): string {
+  // strip parens if present
+  if (type[0] === '(' && type[type.length - 1] === ')') {
+    return type.substring(1, type.length - 1);
+  }
+  return type;
+}
+
+function escapeName(name: string): string {
+  return name.replace(/\\/g, '\\\\');
+}
+
+function paramSignature(params: Array<HackParameterDetails>): ?string {
+  const paramStrings = params.map(param => `${param.type} ${param.name}`);
+  return `(${paramStrings.join(', ')})`;
+}
+
+function matchSnippet(name: string, params: ?Array<HackParameterDetails>): string {
+  const escapedName = escapeName(name);
+  if (params != null) {
+    // Construct the snippet: e.g. myFunction(${1:$arg1}, ${2:$arg2});
+    const paramsString = params.map(
+      (param, index) => `\${${index + 1}:${param.name}}`).join(', ');
+    return `${escapedName}(${paramsString})`;
+  } else {
+    return escapedName;
+  }
+}
+
+// Returns the length of the largest match between a suffix of contents
+// and a prefix of match.
+function matchLength(contents: string, match: string): number {
+  for (let i = match.length; i > 0; i--) {
+    const toMatch = match.substring(0, i);
+    if (contents.endsWith(toMatch)) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+function processCompletions(
+  completionsResponse: Array<HackCompletion>,
+  contents: string,
+  offset: number,
+): Array<atom$AutocompleteSuggestion> {
+  const contentsLine = contents.substring(
+    contents.lastIndexOf('\n', offset - 1) + 1,
+    offset).toLowerCase();
+  return completionsResponse.map((completion: HackCompletion) => {
+    const {name, type, func_details} = completion;
+    const commonResult = {
+      displayText: name,
+      replacementPrefix: contents.substring(
+        offset - matchLength(contentsLine, name.toLowerCase()),
+        offset),
+      description: matchTypeOfType(type),
+    };
+    if (func_details != null) {
+      return {
+        ...commonResult,
+        snippet: matchSnippet(name, func_details.params),
+        leftLabel: func_details.return_type,
+        rightLabel: paramSignature(func_details.params),
+        type: 'function',
+      };
+    } else {
+      return {
+        ...commonResult,
+        snippet: matchSnippet(name),
+        rightLabel: matchTypeOfType(type),
+      };
+    }
+  });
+}
+
 
 /**
  * This is responsible for managing (creating/disposing) multiple HackLanguage instances,
@@ -147,7 +319,7 @@ function createHackLanguage(
     hhAvailable: boolean,
     basePath: ?string,
 ): HackLanguage {
-  return new ServerHackLanguage(hackService, hhAvailable, basePath);
+  return new HackLanguage(hackService, hhAvailable, basePath);
 }
 
 // Returns null if we can't get the key at this time because the RemoteConnection is initializing.
@@ -197,7 +369,6 @@ async function createHackLanguageIfNotExisting(
 // Must clear the cache when servers go away.
 // TODO: Could be more precise about this and only clear those entries
 // for the closed connection.
-function clearHackLanguageCache() {
+export function clearHackLanguageCache() {
   uriToHackLanguage.clear();
 }
-ServerConnection.onDidCloseServerConnection(clearHackLanguageCache);

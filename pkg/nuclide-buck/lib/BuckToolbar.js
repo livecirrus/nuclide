@@ -9,51 +9,45 @@
  * the root directory of this source tree.
  */
 
-import type {BuckProject} from '../../nuclide-buck-base';
+import type {TaskType, TaskSettings} from './types';
 
 import {CompositeDisposable} from 'atom';
 import {React} from 'react-for-atom';
 
 import debounce from '../../commons-node/debounce';
+import {lastly} from '../../commons-node/promise';
+import {createBuckProject} from '../../nuclide-buck-base';
 import SimulatorDropdown from './SimulatorDropdown';
 import BuckToolbarActions from './BuckToolbarActions';
+import BuckToolbarSettings from './ui/BuckToolbarSettings';
 import BuckToolbarStore from './BuckToolbarStore';
+import {Button, ButtonSizes} from '../../nuclide-ui/lib/Button';
 import {Combobox} from '../../nuclide-ui/lib/Combobox';
 import {Checkbox} from '../../nuclide-ui/lib/Checkbox';
 import {LoadingSpinner} from '../../nuclide-ui/lib/LoadingSpinner';
 import addTooltip from '../../nuclide-ui/lib/add-tooltip';
-import {
-  onWorkspaceDidStopChangingActivePaneItem,
-} from '../../commons-atom/debounced';
 
 const BUCK_TARGET_INPUT_WIDTH = 400;
-const formatRequestOptionsErrorMessage = () => 'Failed to get targets from Buck';
+
+type PropTypes = {
+  activeTaskType: ?TaskType;
+  store: BuckToolbarStore;
+  actions: BuckToolbarActions;
+};
 
 class BuckToolbar extends React.Component {
-  /**
-   * The toolbar makes an effort to keep track of which BuckProject to act on, based on the last
-   * TextEditor that had focus that corresponded to a BuckProject. This means that if a user opens
-   * an editor for a file in a Buck project, types in a build target, focuses an editor for a file
-   * that is not part of a Buck project, and hits "Build," the toolbar will build the target in the
-   * project that corresponds to the editor that previously had focus.
-   *
-   * Ultimately, we should have a dropdown to let the user specify the Buck project when it is
-   * ambiguous.
-   */
+  props: PropTypes;
+  state: {settingsVisible: boolean};
+
   _disposables: CompositeDisposable;
   _buckToolbarStore: BuckToolbarStore;
   _buckToolbarActions: BuckToolbarActions;
 
   // Querying Buck can be slow, so cache aliases by project.
   // Putting the cache here allows the user to refresh it by toggling the UI.
-  _projectAliasesCache: WeakMap<BuckProject, Promise<Array<string>>>;
+  _projectAliasesCache: Map<string, Promise<Array<string>>>;
 
-  static propTypes = {
-    store: React.PropTypes.instanceOf(BuckToolbarStore).isRequired,
-    actions: React.PropTypes.instanceOf(BuckToolbarActions).isRequired,
-  };
-
-  constructor(props: mixed) {
+  constructor(props: PropTypes) {
     super(props);
     (this: any)._handleBuildTargetChange =
       debounce(this._handleBuildTargetChange.bind(this), 100, false);
@@ -64,42 +58,41 @@ class BuckToolbar extends React.Component {
 
     this._buckToolbarActions = this.props.actions;
     this._buckToolbarStore = this.props.store;
-    this._projectAliasesCache = new WeakMap();
-    this._onActivePaneItemChanged(atom.workspace.getActivePaneItem());
+    this._projectAliasesCache = new Map();
 
     this._disposables = new CompositeDisposable();
-    this._disposables.add(onWorkspaceDidStopChangingActivePaneItem(
-      this._onActivePaneItemChanged.bind(this)));
 
     // Re-render whenever the data in the store changes.
     this._disposables.add(this._buckToolbarStore.subscribe(() => { this.forceUpdate(); }));
+
+    this.state = {settingsVisible: false};
   }
 
   componentWillUnmount() {
     this._disposables.dispose();
   }
 
-  _onActivePaneItemChanged(item: ?mixed) {
-    if (!atom.workspace.isTextEditor(item)) {
-      return;
-    }
-    const textEditor: TextEditor = ((item: any): TextEditor);
-    this._buckToolbarActions.updateProjectFor(textEditor);
-  }
-
-  _requestOptions(inputText: string): Promise<Array<string>> {
-    const project = this._buckToolbarStore.getMostRecentBuckProject();
-    if (project == null) {
-      return Promise.resolve([]);
+  async _requestOptions(inputText: string): Promise<Array<string>> {
+    const buckRoot = this._buckToolbarStore.getCurrentBuckRoot();
+    if (buckRoot == null) {
+      throw new Error('No active Buck project. Check your Current Working Root.');
     }
 
-    let aliases = this._projectAliasesCache.get(project);
+    let aliases = this._projectAliasesCache.get(buckRoot);
     if (!aliases) {
-      aliases = project.listAliases();
-      this._projectAliasesCache.set(project, aliases);
+      const buckProject = createBuckProject(buckRoot);
+      aliases = lastly(
+        buckProject.listAliases(),
+        () => buckProject.dispose(),
+      );
+      this._projectAliasesCache.set(buckRoot, aliases);
     }
 
-    return aliases;
+    const result = (await aliases).slice();
+    if (inputText.trim() && result.indexOf(inputText) === -1) {
+      result.splice(0, 0, inputText);
+    }
+    return result;
   }
 
   render(): React.Element<any> {
@@ -156,12 +149,13 @@ class BuckToolbar extends React.Component {
       }
     }
 
+    const {activeTaskType} = this.props;
     return (
       <div>
         <Combobox
           className="inline-block nuclide-buck-target-combobox"
           ref="buildTarget"
-          formatRequestOptionsErrorMessage={formatRequestOptionsErrorMessage}
+          formatRequestOptionsErrorMessage={err => err.message}
           requestOptions={this._requestOptions}
           size="sm"
           loadingMessage="Updating target names..."
@@ -170,7 +164,22 @@ class BuckToolbar extends React.Component {
           placeholderText="Buck build target"
           width={BUCK_TARGET_INPUT_WIDTH}
         />
+        <Button
+          className="nuclide-buck-settings icon icon-gear"
+          size={ButtonSizes.SMALL}
+          disabled={activeTaskType == null || this.props.store.getCurrentBuckRoot() == null}
+          onClick={() => this._showSettings()}
+        />
         {widgets}
+        {this.state.settingsVisible && activeTaskType != null ?
+          <BuckToolbarSettings
+            currentBuckRoot ={this.props.store.getCurrentBuckRoot()}
+            settings={this.props.store.getTaskSettings()[activeTaskType] || {}}
+            buildType={activeTaskType}
+            onDismiss={() => this._hideSettings()}
+            onSave={settings => this._saveSettings(activeTaskType, settings)}
+          /> :
+          null}
       </div>
     );
   }
@@ -185,6 +194,19 @@ class BuckToolbar extends React.Component {
 
   _handleReactNativeServerModeChanged(checked: boolean) {
     this._buckToolbarActions.updateReactNativeServerMode(checked);
+  }
+
+  _showSettings() {
+    this.setState({settingsVisible: true});
+  }
+
+  _hideSettings() {
+    this.setState({settingsVisible: false});
+  }
+
+  _saveSettings(taskType: TaskType, settings: TaskSettings) {
+    this._buckToolbarActions.updateTaskSettings(taskType, settings);
+    this._hideSettings();
   }
 
 }

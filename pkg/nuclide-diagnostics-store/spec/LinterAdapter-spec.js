@@ -40,7 +40,9 @@ describe('LinterAdapter', () => {
   let subscribedToAny: any;
   let newUpdateSubscriber: any;
   let publishMessageUpdateSpy: any;
+  let publishMessageInvalidationSpy: any;
   let fakeDiagnosticsProviderBase: any;
+  let bufferDestroyCallback: any;
 
   class FakeDiagnosticsProviderBase {
     publishMessageUpdate: JasmineSpy;
@@ -53,6 +55,7 @@ describe('LinterAdapter', () => {
       this.publishMessageUpdate = jasmine.createSpy();
       publishMessageUpdateSpy = this.publishMessageUpdate;
       this.publishMessageInvalidation = jasmine.createSpy();
+      publishMessageInvalidationSpy = this.publishMessageInvalidation;
       this.dispose = jasmine.createSpy();
       fakeDiagnosticsProviderBase = this;  // eslint-disable-line consistent-this
     }
@@ -60,7 +63,8 @@ describe('LinterAdapter', () => {
       this.publishMessageUpdate.andCallFake(callback);
       return new Disposable(() => {});
     }
-    onMessageInvalidation() {
+    onMessageInvalidation(callback) {
+      this.publishMessageInvalidation.andCallFake(callback);
       return new Disposable(() => {});
     }
   }
@@ -70,9 +74,17 @@ describe('LinterAdapter', () => {
   }
 
   beforeEach(() => {
+    const fakeBuffer = {
+      onDidDestroy(callback) {
+        bufferDestroyCallback = callback;
+        return new Disposable(() => {});
+      },
+      isDestroyed: () => false,
+    };
     fakeEditor = {
       getPath() { return 'foo'; },
       getGrammar() { return {scopeName: grammar}; },
+      getBuffer() { return fakeBuffer; },
     };
     spyOn(atom.workspace, 'getActiveTextEditor').andReturn(fakeEditor);
     linterReturn = Promise.resolve([]);
@@ -154,6 +166,29 @@ describe('LinterAdapter', () => {
     linterAdapter.dispose();
     expect(fakeDiagnosticsProviderBase.dispose).toHaveBeenCalled();
   });
+
+  it('implements invalidateOnClose', () => {
+    newLinterAdapter({
+      grammarScopes: [],
+      allGrammarScopes: true,
+      scope: 'file',
+      lintOnFly: true,
+      invalidateOnClose: true,
+      lint: () => Promise.resolve([
+        {type: 'Error', filePath: 'foo'},
+        {type: 'Error', filePath: 'bar'},
+      ]),
+    });
+    eventCallback(fakeEditor);
+    waitsFor(() => bufferDestroyCallback != null);
+    runs(() => {
+      bufferDestroyCallback();
+      expect(publishMessageInvalidationSpy).toHaveBeenCalledWith({
+        scope: 'file',
+        filePaths: ['foo', 'bar'],
+      });
+    });
+  });
 });
 
 describe('message transformation functions', () => {
@@ -161,6 +196,13 @@ describe('message transformation functions', () => {
     type: 'Error',
     text: 'Uh oh',
     filePath: '/fu/bar',
+  };
+
+  const fileMessageWithName = {
+    type: 'Error',
+    text: 'Uh oh',
+    filePath: '/fu/bar',
+    name: 'Custom Linter Name',
   };
 
   const projectMessage = {
@@ -223,6 +265,24 @@ describe('message transformation functions', () => {
       invariant(messages != null);
       const resultMessage = messages[0];
       expect(resultMessage.providerName).toEqual('Unnamed Linter');
+    });
+
+    it('should use the LinterProvider name when one is not specified in message', () => {
+      const result = runWith([fileMessage]);
+      invariant(result.filePathToMessages);
+      const messages = result.filePathToMessages.get(fileMessage.filePath);
+      invariant(messages != null);
+      const resultMessage = messages[0];
+      expect(resultMessage.providerName).toEqual('provider');
+    });
+
+    it('should use the provider name specified in message when available', () => {
+      const result = runWith([fileMessageWithName]);
+      invariant(result.filePathToMessages);
+      const messages = result.filePathToMessages.get(fileMessageWithName.filePath);
+      invariant(messages != null);
+      const resultMessage = messages[0];
+      expect(resultMessage.providerName).toEqual('Custom Linter Name');
     });
 
     it('should provide both project messages and file messages', () => {

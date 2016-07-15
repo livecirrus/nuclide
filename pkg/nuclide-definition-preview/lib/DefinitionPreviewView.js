@@ -11,7 +11,12 @@
 
 import type {Definition} from '../../nuclide-definition-service';
 
+import {Button, ButtonSizes} from '../../nuclide-ui/lib/Button';
 import {React} from 'react-for-atom';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
+import {ContextViewMessage, NO_DEFINITION_MESSAGE}
+  from '../../nuclide-context-view/lib/ContextViewMessage';
+import {goToLocation} from '../../commons-atom/go-to-location';
 import {bufferForUri} from '../../commons-atom/text-editor';
 import {AtomTextEditor} from '../../nuclide-ui/lib/AtomTextEditor';
 
@@ -38,12 +43,10 @@ export class DefinitionPreviewView extends React.Component {
   constructor(props: Props) {
     super(props);
     this._loadAndScroll = null;
+    (this: any)._openFile = this._openFile.bind(this);
   }
 
   componentWillReceiveProps(newProps: Props): void {
-    if (newProps.definition === this.props.definition) {
-      return;
-    }
     this._loadAndScroll = null;
   }
 
@@ -56,15 +59,15 @@ export class DefinitionPreviewView extends React.Component {
 
   render(): React.Element<any> {
     // Show either the definition in an editor or a message
-    const content: React.Element<any> = (this.props.definition != null)
-      ? this._previewDefinition(this.props.definition)
-      : <div>No definition selected!</div>;
-
-    return (
-      <div className="pane-item padded nuclide-definition-preview">
-        {content}
-      </div>
-    );
+    if (this.props.definition != null) {
+      return (
+        <div className="pane-item padded nuclide-definition-preview">
+          {this._previewDefinition(this.props.definition)}
+        </div>
+      );
+    } else {
+      return <ContextViewMessage message={NO_DEFINITION_MESSAGE} />;
+    }
   }
 
   _previewDefinition(definition: Definition): React.Element<any> {
@@ -100,7 +103,7 @@ export class DefinitionPreviewView extends React.Component {
     this._loadAndScroll = loadAndScroll;
 
     return (
-      <div className="nuclide-definition-preview-container">
+      <div className="nuclide-definition-preview-editor">
         <AtomTextEditor
           ref="editor"
           gutterHidden={true}
@@ -109,14 +112,22 @@ export class DefinitionPreviewView extends React.Component {
           readOnly={true}
           textBuffer={textBuffer}
           syncTextContents={false}
-          autoGrow={true}
         />
+        <div className="nuclide-definition-preview-button-container">
+          <Button onClick={this._openFile} size={ButtonSizes.SMALL}>
+            Open in main editor
+          </Button>
+        </div>
       </div>
     );
-    // TODO add this to AtomTextEditor:
-    // grammar={get grammar from somewhere}
   }
 
+  _openFile(): void {
+    const def = this.props.definition;
+    if (def != null) {
+      goToLocation(def.path, def.position.row, def.position.column, true);
+    }
+  }
   getEditor(): atom$TextEditor {
     return this.refs.editor.getModel();
   }

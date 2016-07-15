@@ -9,8 +9,7 @@
  * the root directory of this source tree.
  */
 
-import type {BuckProject} from '../../nuclide-buck-base';
-import type {SerializedState} from './types';
+import type {SerializedState, TaskSettings, TaskType} from './types';
 
 import {Emitter} from 'atom';
 import {Dispatcher} from 'flux';
@@ -20,12 +19,13 @@ export default class BuckToolbarStore {
 
   _dispatcher: Dispatcher;
   _emitter: Emitter;
-  _mostRecentBuckProject: ?BuckProject;
+  _currentBuckRoot: ?string;
   _isLoadingRule: boolean;
   _buildTarget: string;
   _buildRuleType: string;
   _simulator: ?string;
   _isReactNativeServerMode: boolean;
+  _taskSettings: {[key: TaskType]: TaskSettings};
 
   constructor(dispatcher: Dispatcher, initialState: ?SerializedState) {
     this._dispatcher = dispatcher;
@@ -39,34 +39,38 @@ export default class BuckToolbarStore {
     this._buildTarget = initialState && initialState.buildTarget || '';
     this._buildRuleType = '';
     this._isReactNativeServerMode = initialState && initialState.isReactNativeServerMode || false;
+    this._taskSettings = initialState && initialState.taskSettings || {};
   }
 
   _setupActions() {
     this._dispatcher.register(action => {
       switch (action.actionType) {
-        case BuckToolbarActions.ActionType.UPDATE_PROJECT:
-          this._mostRecentBuckProject = action.project;
+        case BuckToolbarActions.ActionType.UPDATE_BUCK_ROOT:
+          this._currentBuckRoot = action.buckRoot;
           break;
         case BuckToolbarActions.ActionType.UPDATE_BUILD_TARGET:
           this._buildTarget = action.buildTarget;
-          this.emitChange();
           break;
         case BuckToolbarActions.ActionType.UPDATE_IS_LOADING_RULE:
           this._isLoadingRule = action.isLoadingRule;
-          this.emitChange();
           break;
         case BuckToolbarActions.ActionType.UPDATE_RULE_TYPE:
           this._buildRuleType = action.ruleType;
-          this.emitChange();
           break;
         case BuckToolbarActions.ActionType.UPDATE_SIMULATOR:
           this._simulator = action.simulator;
           break;
         case BuckToolbarActions.ActionType.UPDATE_REACT_NATIVE_SERVER_MODE:
           this._isReactNativeServerMode = action.serverMode;
-          this.emitChange();
+          break;
+        case BuckToolbarActions.ActionType.UPDATE_TASK_SETTINGS:
+          this._taskSettings = {
+            ...this._taskSettings,
+            [action.taskType]: action.settings,
+          };
           break;
       }
+      this.emitChange();
     });
   }
 
@@ -86,8 +90,8 @@ export default class BuckToolbarStore {
     return this._buildTarget;
   }
 
-  getMostRecentBuckProject(): ?BuckProject {
-    return this._mostRecentBuckProject;
+  getCurrentBuckRoot(): ?string {
+    return this._currentBuckRoot;
   }
 
   isLoadingRule(): boolean {
@@ -110,8 +114,16 @@ export default class BuckToolbarStore {
     return this.canBeReactNativeApp() || this._buildRuleType === 'apk_genrule';
   }
 
+  isDebuggableRule(): boolean {
+    return this.isInstallableRule() || this._buildRuleType === 'cxx_test';
+  }
+
   getSimulator(): ?string {
     return this._simulator;
+  }
+
+  getTaskSettings(): {[key: TaskType]: TaskSettings} {
+    return this._taskSettings;
   }
 
 }

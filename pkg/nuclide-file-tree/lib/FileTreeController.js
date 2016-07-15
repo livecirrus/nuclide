@@ -75,6 +75,20 @@ class FileTreeController {
         // NOTE: This is specifically for use in Diff View, so don't expose a menu item.
         /* eslint-disable nuclide-internal/command-menu-items */
         'nuclide-file-tree:reveal-text-editor': this._revealTextEditor.bind(this),
+        // This command is to workaround the initialization order problem between the
+        // nuclide-remote-projects and nuclide-file-tree packages.
+        // The file-tree starts up and restores its state, which can have a (remote) project root.
+        // But at this point it's not a real directory. It is not present in
+        // atom.project.getDirectories() and essentially it's a fake, but a useful one, as it has
+        // the state (open folders, selection etc.) serialized in it. So we don't want to discard
+        // it. In most cases, after a successful reconnect the real directory instance will be
+        // added to the atom.project.directories and the previously fake root would become real.
+        // The problem happens when the connection fails, or is canceled.
+        // The fake root just stays in the file tree. To workaround that, this command can be used
+        // to force the file-tree reflect the actual state of the projects.
+        // Ideally, we'd like a service dependency between the two packages, but I (advinskyt) don't
+        // see it happening any time soon.
+        'nuclide-file-tree:force-refresh-roots': this._updateRootDirectories.bind(this),
         /* eslint-enable nuclide-internal/command-menu-items */
         'nuclide-file-tree:reveal-active-file': this.revealActiveFile.bind(this, undefined),
       })
@@ -499,7 +513,7 @@ class FileTreeController {
       // close all the files associated with the project before closing
       const projectEditors = atom.workspace.getTextEditors();
       const roots = this._store.getRootKeys();
-      projectEditors.forEach(editor => {
+      const canceled = projectEditors.some(editor => {
         const path = editor.getPath();
         // if the path of the editor is not null AND
         // is part of the currently selected root that would be removed AND
@@ -509,21 +523,61 @@ class FileTreeController {
           path.startsWith(rootNode.uri) &&
           roots.filter(root => path.startsWith(root)).length === 1
         ) {
-          atom.workspace.paneForURI(path).destroyItem(editor);
+          return !atom.workspace.paneForURI(path).destroyItem(editor);
         }
+
+        return false;
       });
-      // actually close the project
-      atom.project.removePath(FileTreeHelpers.keyToPath(rootNode.uri));
+
+      if (!canceled) {
+        // actually close the project
+        atom.project.removePath(FileTreeHelpers.keyToPath(rootNode.uri));
+      }
     }
   }
 
   _searchInDirectory(event: Event): void {
+    const targetElement = ((event.target: any): HTMLElement);
+    let shouldClearPath = false;
+    // If the event was sent to the entire tree, rather then a single element - attempt to derive
+    // the path to work on from the current selection.
+    if (targetElement.classList.contains('nuclide-file-tree')) {
+      const node = this._store.getSingleSelectedNode();
+      if (node == null) {
+        return;
+      }
+
+      let path = node.uri;
+      if (!node.isContainer) {
+        invariant(node.parent);
+        path = node.parent.uri;
+      }
+
+      // What we see here is an unfortunate example of "DOM as an API" paradigm :-(
+      // Atom's handler for the "show-in-current-directory" command is context sensitive
+      // and it derives the context from the custom "data-path" attribute.
+      // This attribute is available through the `.dataset.path` property of the event's target
+      // element. If missing in the target element, the descendants are queried.
+      // See: https://github.com/atom/find-and-replace/blob/66f09c532bb4f7b941282b99d4daf85a08d2288c/lib/project-find-view.coffee#L277
+      //
+      // This works when the command is targeted at an entry in the file-tree DOM structure, because
+      // we add these attributes too, to maintain compatibility with Atom. But, obviously, the
+      // file-tree root can't have one. Unfortunately, when we use keyboard shortcuts to trigger the
+      // commands the focused element is the tree root.
+      // So, to pass the contextual information somehow, we temporarily
+      // add this attribute to the root element (and cleanup once the command is issued).
+      targetElement.dataset.path = path;
+      shouldClearPath = true;
+    }
     // Dispatch a command to show the `ProjectFindView`. This opens the view and focuses the search
     // box.
     atom.commands.dispatch(
-      ((event.target: any): HTMLElement),
+      targetElement,
       'project-find:show-in-current-directory'
     );
+    if (shouldClearPath) {
+      delete targetElement.dataset.path;
+    }
   }
 
   _showInFileManager(): void {

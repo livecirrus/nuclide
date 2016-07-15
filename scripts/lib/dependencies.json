@@ -2,18 +2,18 @@
   "atom": {
     "clientOnly": true,
     "dependency": "Atom",
-    "version": "1.7.4",
-    "version-output": "Atom    : 1.7.4\nElectron: 0.36.8\nChrome  : 47.0.2526.110\nNode    : 5.1.1",
-    "url": "https://github.com/atom/atom/releases/download/v1.7.4/atom-mac.zip",
-    "shasum": "30fec157dde2ce4fa025d90709e65752b889585c5d0ff5525f39ca4e792a7a62"
+    "version": "1.8.0",
+    "version-output": "Atom    : 1.8.0\nElectron: 0.36.8\nChrome  : 47.0.2526.110\nNode    : 5.1.1",
+    "url": "https://github.com/atom/atom/releases/download/v1.8.0/atom-mac.zip",
+    "shasum": "5fe3c72a13164a97d33a9310ff8ee5c387d4151833dc3c45421b7ae90f558d7c"
   },
   "flow": {
     "clientOnly": false,
     "dependency": "flow",
-    "version": "0.27.0",
-    "version-output": "Flow, a static type checker for JavaScript, version 0.27.0",
-    "url": "https://github.com/facebook/flow/releases/download/v0.27.0/flow-osx-v0.27.0.zip",
-    "shasum": "f563b0ca2a810fcbb8524dfe0aec31ab4a1a0550326b4c5b10cd5240bbe17a6f"
+    "version": "0.29.0",
+    "version-output": "Flow, a static type checker for JavaScript, version 0.29.0",
+    "url": "https://github.com/facebook/flow/releases/download/v0.29.0/flow-osx-v0.29.0.zip",
+    "shasum": "81673a097999241789d42e0efe099026720a1b3288bb8c60a6975d625d50f886"
   },
   "node": {
     "clientOnly": false,

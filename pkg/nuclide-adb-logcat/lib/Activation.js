@@ -14,6 +14,7 @@ import type {OutputService} from '../../nuclide-console/lib/types';
 import formatEnoentNotification from '../../commons-atom/format-enoent-notification';
 import {createProcessStream} from './createProcessStream';
 import createMessageStream from './createMessageStream';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {LogTailer} from '../../nuclide-console/lib/LogTailer';
 import {CompositeDisposable, Disposable} from 'atom';
 import Rx from 'rxjs';
@@ -38,31 +39,30 @@ class Activation {
               0,
             )
           ))
-          .do({
-            error(err) {
-              if (isNoEntError(err)) {
-                const {message, meta} = formatEnoentNotification({
-                  feature: 'Tailing Android (adb) logs',
-                  toolName: 'adb',
-                  pathSetting: 'nuclide-adb-logcat.pathToAdb',
-                });
-                atom.notifications.addError(message, meta);
-                return;
-              }
-              atom.notifications.addError(
-                'adb logcat has crashed 3 times.'
-                + ' You can manually restart it using the "Nuclide Adb Logcat: Start" command.'
-              );
-            },
+          .catch(err => {
+            if (isNoEntError(err)) {
+              const {message, meta} = formatEnoentNotification({
+                feature: 'Tailing Android (adb) logs',
+                toolName: 'adb',
+                pathSetting: 'nuclide-adb-logcat.pathToAdb',
+              });
+              atom.notifications.addError(message, meta);
+              return Rx.Observable.empty();
+            }
+
+            throw err;
           })
       )
     );
 
-    this._logTailer = new LogTailer(message$, {
-      start: 'adb-logcat:start',
-      stop: 'adb-logcat:stop',
-      restart: 'adb-logcat:restart',
-      error: 'adb-logcat:crash',
+    this._logTailer = new LogTailer({
+      name: 'adb Logcat',
+      messages: message$,
+      trackingEvents: {
+        start: 'adb-logcat:start',
+        stop: 'adb-logcat:stop',
+        restart: 'adb-logcat:restart',
+      },
     });
 
     this._disposables = new CompositeDisposable(
@@ -75,11 +75,16 @@ class Activation {
     );
   }
 
-  consumeOutputService(api: OutputService): IDisposable {
-    return api.registerOutputProvider({
-      id: 'adb logcat',
-      messages: this._logTailer.getMessages(),
-    });
+  consumeOutputService(api: OutputService): void {
+    this._disposables.add(
+      api.registerOutputProvider({
+        id: 'adb logcat',
+        messages: this._logTailer.getMessages(),
+        observeStatus: cb => this._logTailer.observeStatus(cb),
+        start: () => { this._logTailer.start(); },
+        stop: () => { this._logTailer.stop(); },
+      })
+    );
   }
 
   dispose() {

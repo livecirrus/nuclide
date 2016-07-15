@@ -22,8 +22,10 @@ import {repositoryForPath} from '../../nuclide-hg-git-bridge';
 import {StatusCodeNumber} from '../../nuclide-hg-repository-base/lib/hg-constants';
 import {getLogger} from '../../nuclide-logging';
 
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {WorkingSet} from '../../nuclide-working-sets';
 import {track} from '../../nuclide-analytics';
+import nuclideUri from '../../nuclide-remote-uri';
 
 // Used to ensure the version we serialized is the same version we are deserializing.
 const VERSION = 1;
@@ -48,7 +50,7 @@ export type ExportStoreData = {
 };
 
 export type StoreConfigData = {
-    vcsStatuses: {[rootUri: NuclideUri]: {[path: NuclideUri]: StatusCodeNumberValue}};
+    vcsStatuses: Immutable.Map<NuclideUri, {[path: NuclideUri]: StatusCodeNumberValue}>;
     workingSet: WorkingSet;
     hideIgnoredNames: boolean;
     excludeVcsIgnoredPaths: boolean;
@@ -64,7 +66,7 @@ export type NodeCheckedStatus = 'checked' | 'clear' | 'partial';
 
 
 const DEFAULT_CONF = {
-  vcsStatuses: {},
+  vcsStatuses: new Immutable.Map(),
   workingSet: new WorkingSet(),
   editedWorkingSet: new WorkingSet(),
   hideIgnoredNames: true,
@@ -231,8 +233,19 @@ export class FileTreeStore {
       this.openFilesExpanded = data.openFilesExpanded;
     }
 
+    const normalizedAtomPaths = atom.project.getPaths().map(nuclideUri.ensureTrailingSeparator);
+    const normalizedDataPaths = data.rootKeys
+      .map(nuclideUri.ensureTrailingSeparator)
+      .filter(rootUri =>
+        nuclideUri.isRemote(rootUri) || normalizedAtomPaths.indexOf(rootUri) >= 0
+      );
+    const pathsMissingInData = normalizedAtomPaths.filter(rootUri =>
+      normalizedDataPaths.indexOf(rootUri) === -1
+    );
+    const combinedPaths = normalizedDataPaths.concat(pathsMissingInData);
+
     this._setRoots(new Immutable.OrderedMap(
-      data.rootKeys.map(rootUri => [rootUri, buildNode(rootUri, rootUri)])
+      combinedPaths.map(rootUri => [rootUri, buildNode(rootUri, rootUri)])
     ));
   }
 
@@ -623,7 +636,9 @@ export class FileTreeStore {
     });
 
     if (this._vcsStatusesAreDifferent(rootKey, enrichedVcsStatuses)) {
-      this._updateConf(conf => { conf.vcsStatuses[rootKey] = enrichedVcsStatuses; });
+      this._updateConf(conf => {
+        conf.vcsStatuses = conf.vcsStatuses.set(rootKey, enrichedVcsStatuses);
+      });
     }
   }
 
@@ -631,7 +646,7 @@ export class FileTreeStore {
     rootKey: NuclideUri,
     newVcsStatuses: {[path: NuclideUri]: StatusCodeNumberValue},
   ): boolean {
-    const currentStatuses = this._conf.vcsStatuses[rootKey];
+    const currentStatuses = this._conf.vcsStatuses.get(rootKey);
     if (currentStatuses == null || newVcsStatuses == null) {
       if (currentStatuses !== newVcsStatuses) {
         return true;
@@ -907,10 +922,6 @@ export class FileTreeStore {
   }
 
   clearFilter(): void {
-    // Don't waste time if the filter is already clear.
-    if (this._filter === '') {
-      return;
-    }
     this._filter = '';
     this._updateRoots(root => {
       return root.setRecursive(
@@ -921,8 +932,9 @@ export class FileTreeStore {
   }
 
   removeFilterLetter(): void {
+    const oldLength = this._filter.length;
     this._filter = this._filter.substr(0, this._filter.length - 1);
-    if (this._filter.length) {
+    if (oldLength > 1) {
       this._updateRoots(root => {
         return root.setRecursive(
           node => null,
@@ -935,7 +947,7 @@ export class FileTreeStore {
         );
       });
       this._emitChange();
-    } else {
+    } else if (oldLength === 1) {
       this.clearFilter();
     }
   }

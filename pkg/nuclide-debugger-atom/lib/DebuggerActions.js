@@ -16,10 +16,14 @@ import type {
   NuclideDebuggerProvider,
   NuclideEvaluationExpressionProvider,
 } from '../../nuclide-debugger-interfaces/service';
-import type {DebuggerStore, DebuggerModeType} from './DebuggerStore';
+import type {DebuggerStore} from './DebuggerStore';
 import type DebuggerProcessInfoType from './DebuggerProcessInfo';
 import type DebuggerInstance from './DebuggerInstance';
-import type {Callstack} from './CallstackStore';
+import type {
+  Callstack,
+  DebuggerModeType,
+  ExpansionResult,
+} from './types';
 
 import Constants from './Constants';
 import {CompositeDisposable} from 'atom';
@@ -375,6 +379,15 @@ class DebuggerActions {
       data: {
         path,
         line,
+      },
+    });
+  }
+
+  updateLocals(locals: ExpansionResult): void {
+    this._dispatcher.dispatch({
+      actionType: Constants.Actions.UPDATE_LOCALS,
+      data: {
+        locals,
       },
     });
   }

@@ -15,6 +15,7 @@ import {ButtonGroup} from './ButtonGroup';
 import {ButtonToolbar} from './ButtonToolbar';
 import {Block} from './Block';
 import {Dropdown} from './Dropdown';
+import {ModalMultiSelect} from './ModalMultiSelect';
 import {SplitButtonDropdown} from './SplitButtonDropdown';
 
 const ButtonSizeExample = (): React.Element<any> => (
@@ -60,12 +61,12 @@ const ButtonColorExample = (): React.Element<any> => (
 const ButtonIconExample = (): React.Element<any> => (
   <Block>
     <ButtonGroup>
-      <Button icon="gear"></Button>
-      <Button icon="cloud-download"></Button>
-      <Button icon="code"></Button>
-      <Button icon="check"></Button>
-      <Button icon="device-mobile"></Button>
-      <Button icon="alert"></Button>
+      <Button icon="gear" />
+      <Button icon="cloud-download" />
+      <Button icon="code" />
+      <Button icon="check" />
+      <Button icon="device-mobile" />
+      <Button icon="alert" />
     </ButtonGroup>
   </Block>
 );
@@ -139,9 +140,10 @@ const DropdownExample = (() => {
 const SplitButtonDropdownExample = (() => {
   const options = [
     {value: 1, label: 'Build', icon: 'tools'},
-    {value: 2, label: 'Run', icon: 'triangle-right'},
+    {value: 2, label: 'Run', icon: 'triangle-right', selectedLabel: 'Run It!'},
     {value: 3, label: 'Rocket', icon: 'rocket'},
     {value: 4, label: 'Squirrel', icon: 'squirrel'},
+    {value: 5, label: 'Beaker', icon: 'beaker', disabled: true},
   ];
   return (): React.Element<any> => (
     <div>
@@ -152,6 +154,31 @@ const SplitButtonDropdownExample = (() => {
     </div>
   );
 })();
+
+class ModalMultiSelectExample extends React.Component {
+  state: {value: Array<number>};
+
+  constructor(props: void) {
+    super(props);
+    this.state = {value: [2]};
+  }
+
+  render(): React.Element<any> {
+    const options = [
+      {value: 1, label: 'One'},
+      {value: 2, label: 'Two'},
+      {value: 3, label: 'Three'},
+      {value: 4, label: 'Four'},
+    ];
+    return (
+      <ModalMultiSelect
+        options={options}
+        onChange={value => { this.setState({value}); }}
+        value={this.state.value}
+      />
+    );
+  }
+}
 
 export const ButtonExamples = {
   sectionName: 'Buttons',
@@ -188,6 +215,10 @@ export const ButtonExamples = {
     {
       title: 'Split Button Dropdown',
       component: SplitButtonDropdownExample,
+    },
+    {
+      title: 'Modal Multi-Select',
+      component: ModalMultiSelectExample,
     },
   ],
 };

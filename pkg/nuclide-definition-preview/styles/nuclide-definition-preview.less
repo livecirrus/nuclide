@@ -1,28 +1,19 @@
-@import 'ui-variables';
-
 .nuclide-definition-preview {
-  display: flex;
-  flex-flow: column;
-  width: 100%;
   padding: 5px;
 }
 
-.nuclide-definition-preview-panel {
+.nuclide-definition-preview-editor {
+  height: 50em;
   display: flex;
   flex-direction: column;
-  width: 100%;
-}
-
-.nuclide-definition-preview-container {
-  display: flex;
   flex: 1 1 auto;
-  overflow: auto;
+  .nuclide-text-editor-container {
+    display: flex;
+  }
 }
 
-.nuclide-definition-preview-definition-container .nuclide-text-editor-container {
-  display: flex;
-}
-
-.panel-heading .nuclide-definition-preview-close-button {
-  top: -0.25em;
+.nuclide-definition-preview-button-container {
+  text-align: right;
+  padding-top: .5em;
+  padding-right: .5em;
 }

@@ -215,7 +215,8 @@ export function openConnectionDialog(props?: Object): Promise<?RemoteConnection>
 
       // Center the parent in both Atom v1.6 and in Atom v1.8.
       // TODO(ssorallen): Remove all but `maxWidth` once Nuclide is Atom v1.8+
-      const parentEl = hostEl.parentElement;
+      // $FlowFixMe
+      const parentEl: HTMLElement = hostEl.parentElement;
       if (parentEl != null) {
         parentEl.style.left = '50%';
         parentEl.style.margin = '0 0 0 -40em';
@@ -230,6 +231,10 @@ export function openConnectionDialog(props?: Object): Promise<?RemoteConnection>
       ReactDOM.render(<ConnectionDialog {...initialDialogProps} />, hostEl);
     }
 
-    openBaseDialog();
+    // Select the last profile that was used. It's possible the config changed since the last time
+    // this was opened and the profile no longer exists. If the profile is not found,
+    // `openBaseDialog` will select the "default" / "Most Recent" option.
+    openBaseDialog(compositeConnectionProfiles.find(
+      profile => profile.displayTitle === defaultConnectionProfile.params.displayTitle));
   });
 }

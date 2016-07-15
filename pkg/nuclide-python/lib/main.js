@@ -13,15 +13,24 @@ import type {OutlineProvider} from '../../nuclide-outline-view';
 import type {DefinitionProvider} from '../../nuclide-definition-service';
 import type {FindReferencesProvider} from '../../nuclide-find-references';
 import type {CodeFormatProvider} from '../../nuclide-code-format/lib/types';
+import type {LinterProvider} from '../../nuclide-diagnostics-base';
 
+import invariant from 'assert';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
+import {DedupedBusySignalProviderBase} from '../../nuclide-busy-signal';
 import {GRAMMAR_SET} from './constants';
+import {getLintOnFly} from './config';
 import AutocompleteHelpers from './AutocompleteHelpers';
 import DefinitionHelpers from './DefinitionHelpers';
 import OutlineHelpers from './OutlineHelpers';
 import ReferenceHelpers from './ReferenceHelpers';
 import CodeFormatHelpers from './CodeFormatHelpers';
+import LintHelpers from './LintHelpers';
+
+let busySignalProvider: ?DedupedBusySignalProviderBase = null;
 
 export function activate() {
+  busySignalProvider = new DedupedBusySignalProviderBase();
 }
 
 export function createAutocompleteProvider(): atom$AutocompleteProvider {
@@ -77,11 +86,32 @@ export function provideCodeFormat(): CodeFormatProvider {
   return {
     selector: 'source.python',
     inclusionPriority: 1,
-
     formatEntireFile(editor, range) {
       return CodeFormatHelpers.formatEntireFile(editor, range);
     },
   };
+}
+
+export function provideLint(): LinterProvider {
+  return {
+    grammarScopes: Array.from(GRAMMAR_SET),
+    scope: 'file',
+    lintOnFly: getLintOnFly(),
+    name: 'nuclide-python',
+    invalidateOnClose: true,
+    lint(editor) {
+      invariant(busySignalProvider);
+      return busySignalProvider.reportBusy(
+        `Python: Waiting for flake8 lint results for \`${editor.getTitle()}\``,
+        () => LintHelpers.lint(editor),
+      );
+    },
+  };
+}
+
+export function provideBusySignal(): DedupedBusySignalProviderBase {
+  invariant(busySignalProvider);
+  return busySignalProvider;
 }
 
 export function deactivate() {

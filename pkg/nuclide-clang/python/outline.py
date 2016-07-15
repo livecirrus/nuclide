@@ -8,12 +8,14 @@
 
 from __future__ import print_function
 
-from clang.cindex import Config, Cursor, CursorKind, Index
+from clang.cindex import Config, Cursor, CursorKind, Index, TokenKind
 from utils import range_dict_relative
 
 import ctypes
+import itertools
 import json
 import os
+import re
 import sys
 
 # Function/method cursor kinds.
@@ -60,8 +62,20 @@ VAR_KINDS = set([
     'VAR_DECL',
 ])
 
+# Capture the ubiquitous GTest-style TEST/TEST_F macros.
+GTEST_MACROS = set(['TEST', 'TEST_F'])
+MACRO_INSTANTIATION = 'MACRO_INSTANTIATION'
+
+OTHER_KINDS = set([
+    MACRO_INSTANTIATION,
+])
+
 # Record any of the cursor types listed above.
-ALL_KINDS = FUNCTION_KINDS | CLASS_KINDS | MEMBER_KINDS | VAR_KINDS
+ALL_KINDS = FUNCTION_KINDS | CLASS_KINDS | MEMBER_KINDS | VAR_KINDS | OTHER_KINDS
+
+
+# People like adding a '-' by convention, but strip that out.
+PRAGMA_MARK_REGEX = re.compile('^\s*#pragma\s+mark\s+(?:-\s*)?(.+)$', re.MULTILINE)
 
 
 def visit_cursor(libclang, cursor):
@@ -106,6 +120,25 @@ def visit_cursor(libclang, cursor):
             if child_outline is not None:
                 children.append(child_outline)
 
+    if kind == MACRO_INSTANTIATION:
+        params = []
+        if name in GTEST_MACROS:
+            # Should look like TEST(id, id).
+            tokens = list(itertools.islice(cursor.get_tokens(), 1, 6))
+            if len(tokens) == 5 and (
+                tokens[0].kind == TokenKind.PUNCTUATION and
+                tokens[1].kind == TokenKind.IDENTIFIER and
+                tokens[2].kind == TokenKind.PUNCTUATION and
+                tokens[3].kind == TokenKind.IDENTIFIER and
+                tokens[4].kind == TokenKind.PUNCTUATION
+            ):
+                params = [tokens[1].spelling, tokens[3].spelling]
+            else:
+                return None
+        else:
+            # TODO(hansonw): Handle other special macros like DEFINE_ params.
+            return None
+
     ret = {
         'name': name,
         'cursor_kind': kind,
@@ -118,7 +151,7 @@ def visit_cursor(libclang, cursor):
     return {k: v for k, v in ret.items() if v is not None}
 
 
-def get_outline(libclang, translation_unit):
+def get_outline(libclang, translation_unit, contents):
     root_cursor = translation_unit.cursor
 
     # This is the same as Cursor.get_children minus an assert in visitor().
@@ -134,4 +167,27 @@ def get_outline(libclang, translation_unit):
 
     result = []
     libclang.clang_visitChildren(root_cursor, callback_type(visitor), result)
-    return result
+
+    # Look for pragma marks. These are not detectable in the AST.
+    line = 0
+    lastpos = 0
+    for mark in PRAGMA_MARK_REGEX.finditer(contents):
+        while lastpos < mark.start():
+            if contents[lastpos] == '\n':
+                line += 1
+            lastpos += 1
+        result.append({
+            'name': mark.group(1),
+            'cursor_kind': 'PRAGMA_MARK',
+            'extent': {
+                'start': {'line': line, 'column': 0},
+                'end': {'line': line + 1, 'column': 0},
+            },
+        })
+
+    return sorted(result, key=lambda x: (
+        x['extent']['start']['line'],
+        x['extent']['start']['column'],
+        x['extent']['end']['line'],
+        x['extent']['end']['column'],
+    ))

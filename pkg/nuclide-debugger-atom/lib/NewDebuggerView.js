@@ -10,13 +10,15 @@
  */
 
 import type DebuggerModel from './DebuggerModel';
-import type {DebuggerModeType} from './DebuggerStore';
 import type Multimap from './Multimap';
-import type {FileLineBreakpoints} from './BreakpointListComponent';
 import type {
   WatchExpressionListStore,
 } from './WatchExpressionListStore';
-import type {Callstack} from './CallstackStore';
+import type {
+  Callstack,
+  DebuggerModeType,
+  FileLineBreakpoints,
+} from './types';
 
 import {CompositeDisposable} from 'atom';
 import {
@@ -25,6 +27,7 @@ import {
 import {Section} from '../../nuclide-ui/lib/Section';
 import {bindObservableAsProps} from '../../nuclide-ui/lib/bindObservableAsProps';
 import {WatchExpressionComponent} from './WatchExpressionComponent';
+import {LocalsComponent} from './LocalsComponent';
 import {BreakpointListComponent} from './BreakpointListComponent';
 import {DebuggerSteppingComponent} from './DebuggerSteppingComponent';
 import {DebuggerCallstackComponent} from './DebuggerCallstackComponent';
@@ -58,16 +61,23 @@ export class NewDebuggerView extends React.Component {
     callstack: ?Callstack;
     breakpoints: ?FileLineBreakpoints;
   };
-  _wrappedComponent: ReactClass<any>;
+  _watchExpressionComponentWrapped: ReactClass<any>;
+  _localsComponentWrapped: ReactClass<any>;
   _disposables: CompositeDisposable;
 
   constructor(props: Props) {
     super(props);
-    this._wrappedComponent = bindObservableAsProps(
-      props.watchExpressionListStore.getWatchExpressions().map(
+    this._watchExpressionComponentWrapped = bindObservableAsProps(
+      props.model.getWatchExpressionListStore().getWatchExpressions().map(
         watchExpressions => ({watchExpressions})
       ),
       WatchExpressionComponent
+    );
+    this._localsComponentWrapped = bindObservableAsProps(
+      props.model.getLocalsStore().getLocals().map(
+        locals => ({locals})
+      ),
+      LocalsComponent
     );
     this._disposables = new CompositeDisposable();
     this.state = {
@@ -115,7 +125,8 @@ export class NewDebuggerView extends React.Component {
       model,
     } = this.props;
     const actions = model.getActions();
-    const WatchExpressionComponentWrapped = this._wrappedComponent;
+    const WatchExpressionComponentWrapped = this._watchExpressionComponentWrapped;
+    const LocalsComponentWrapped = this._localsComponentWrapped;
     return (
       <div className="nuclide-debugger-container-new">
         <Section collapsable={true} headline="Debugger Controls">
@@ -132,15 +143,21 @@ export class NewDebuggerView extends React.Component {
         </Section>
         <Section collapsable={true} headline="Breakpoints">
           <BreakpointListComponent
+            actions={actions}
             breakpoints={this.state.breakpoints}
+          />
+        </Section>
+        <Section collapsable={true} headline="Locals">
+          <LocalsComponentWrapped
+            watchExpressionStore={model.getWatchExpressionStore()}
           />
         </Section>
         <Section collapsable={true} headline="Watch Expressions">
           <WatchExpressionComponentWrapped
-          onAddWatchExpression={actions.addWatchExpression.bind(model)}
-          onRemoveWatchExpression={actions.removeWatchExpression.bind(model)}
-          onUpdateWatchExpression={actions.updateWatchExpression.bind(model)}
-          watchExpressionStore={model.getWatchExpressionStore()}
+            onAddWatchExpression={actions.addWatchExpression.bind(model)}
+            onRemoveWatchExpression={actions.removeWatchExpression.bind(model)}
+            onUpdateWatchExpression={actions.updateWatchExpression.bind(model)}
+            watchExpressionStore={model.getWatchExpressionStore()}
           />
         </Section>
       </div>

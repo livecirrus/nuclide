@@ -9,7 +9,7 @@
  * the root directory of this source tree.
  */
 
-import type {Record, Executor, OutputProvider} from '../types';
+import type {Record, Executor, OutputProvider, Source} from '../types';
 
 import debounce from '../../../commons-node/debounce';
 import {React} from 'react-for-atom';
@@ -29,10 +29,10 @@ type Props = {
   executors: Map<string, Executor>;
   invalidFilterInput: boolean;
   enableRegExpFilter: boolean;
-  selectedSourceId: string;
+  selectedSourceIds: Array<string>;
   selectExecutor: (executorId: string) => void;
-  selectSource: (sourceId: string) => void;
-  sources: Array<{id: string; name: string}>;
+  selectSources: (sourceIds: Array<string>) => void;
+  sources: Array<Source>;
   toggleRegExpFilter: () => void;
   updateFilterText: (filterText: string) => void;
   getProvider: (id: string) => ?OutputProvider;
@@ -99,8 +99,8 @@ export default class ConsoleView extends React.Component {
 
       this._shouldScrollToBottom = isScrolledToBottom;
 
-      // If we receive new messages after we've scrolled away from the bottom, show the "new messages"
-      // notification.
+      // If we receive new messages after we've scrolled away from the bottom, show the
+      // "new messages" notification.
       if (!isScrolledToBottom) {
         this.setState({unseenMessages: true});
       }
@@ -118,11 +118,11 @@ export default class ConsoleView extends React.Component {
           clear={this.props.clearRecords}
           invalidFilterInput={this.props.invalidFilterInput}
           enableRegExpFilter={this.props.enableRegExpFilter}
-          selectedSourceId={this.props.selectedSourceId}
+          selectedSourceIds={this.props.selectedSourceIds}
           sources={this.props.sources}
           toggleRegExpFilter={this.props.toggleRegExpFilter}
           onFilterTextChange={this.props.updateFilterText}
-          onSelectedSourceChange={this.props.selectSource}
+          onSelectedSourcesChange={this.props.selectSources}
         />
         {/*
           We need an extra wrapper element here in order to have the new messages notification stick
@@ -135,7 +135,7 @@ export default class ConsoleView extends React.Component {
             onScroll={this._handleScroll}>
             <OutputTable
               records={this.props.records}
-              showSourceLabels={!this.props.selectedSourceId}
+              showSourceLabels={this.props.selectedSourceIds.length > 1}
               getExecutor={id => this.props.executors.get(id)}
               getProvider={this.props.getProvider}
             />

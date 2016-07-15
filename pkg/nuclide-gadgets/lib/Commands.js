@@ -44,6 +44,11 @@ export default class Commands {
   }
 
   deactivate(): void {
+    // Destroy all the gadgets.
+    this._getState().get('gadgets').forEach((gadget, gadgetId) => {
+      this.destroyGadget(gadgetId);
+    });
+
     this._observer.next({
       type: ActionTypes.DEACTIVATE,
     });
@@ -195,7 +200,6 @@ export default class Commands {
             item.element,
           );
 
-          // $FlowIssue(t10268095)
           this._observer.next({
             type: ActionTypes.UPDATE_PANE_ITEM,
             payload: {
@@ -321,6 +325,7 @@ export default class Commands {
   }
 
   unregisterGadget(gadgetId: string): void {
+    this.destroyGadget(gadgetId);
     this._observer.next({
       type: ActionTypes.UNREGISTER_GADGET,
       payload: {gadgetId},

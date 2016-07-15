@@ -1,6 +1,6 @@
 {
   "name": "nuclide",
-  "version": "0.147.0",
+  "version": "0.155.0",
   "description": "A unified developer experience for web and mobile development, built as a suite of features on top of Atom to provide hackability and the support of an active community.",
   "keywords": [
     "arcanist",
@@ -58,6 +58,7 @@
     "lodash.memoize": "3.0.4",
     "log4js": "0.6.33",
     "lru-cache": "4.0.1",
+    "marked": "0.3.5",
     "minimatch": "3.0.0",
     "mkdirp": "0.5.1",
     "mv": "2.1.1",
@@ -89,14 +90,14 @@
   "devDependencies": {
     "ast-types-flow": "0.0.7",
     "atom-grammar-test": "0.6.2",
-    "babel-eslint": "6.0.4",
-    "eslint": "2.9.0",
-    "eslint-plugin-babel": "3.2.0",
+    "babel-eslint": "6.1.2",
+    "eslint": "3.0.1",
+    "eslint-plugin-babel": "3.3.0",
     "eslint-plugin-flow-vars": "0.4.0",
     "eslint-plugin-jasmine": "1.8.1",
     "eslint-plugin-nuclide-internal": "file:resources/eslint-plugin-nuclide-internal",
     "eslint-plugin-prefer-object-spread": "1.1.0",
-    "eslint-plugin-react": "5.0.1",
+    "eslint-plugin-react": "5.2.2",
     "fs-extra": "0.26.7",
     "jasmine-node": "1.14.5",
     "mock-spawn": "0.2.6",
@@ -105,7 +106,7 @@
   },
   "optionalDependencies": {},
   "engines": {
-    "atom": ">=1.7.4",
+    "atom": ">=1.8.0",
     "node": ">=5.1.1"
   },
   "private": true,

@@ -17,6 +17,7 @@ import type {
 import invariant from 'assert';
 import {React} from 'react-for-atom';
 import {Button} from './Button';
+import {ButtonGroup} from './ButtonGroup';
 import {DiagnosticsMessageText} from './DiagnosticsMessageText';
 import {DiagnosticsTraceItem} from './DiagnosticsTraceItem';
 import nuclideUri from '../../nuclide-remote-uri';
@@ -75,14 +76,16 @@ export const DiagnosticsMessage = (props: DiagnosticsMessageProps) => {
       fixer(message);
     };
     fixButton = (
-      <Button size="EXTRA_SMALL" onClick={applyFix}>Fix</Button>
+      <Button className="btn-success" size="EXTRA_SMALL" onClick={applyFix}>Fix</Button>
     );
   }
   const header = (
     <div className="nuclide-diagnostics-gutter-ui-popup-header">
-      {fixButton}
-      <Button size="EXTRA_SMALL" onClick={copy}>Copy</Button>
-      <span className={`pull-right ${providerClassName}`}>{message.providerName}</span>
+      <ButtonGroup>
+        {fixButton}
+        <Button size="EXTRA_SMALL" onClick={copy}>Copy</Button>
+      </ButtonGroup>
+      <span className={providerClassName}>{message.providerName}</span>
     </div>
   );
   const traceElements = message.trace
@@ -97,7 +100,7 @@ export const DiagnosticsMessage = (props: DiagnosticsMessageProps) => {
   return (
     <div>
       {header}
-      <div>
+      <div className="nuclide-diagnostics-gutter-ui-popup-message">
         <DiagnosticsMessageText message={message} />
       </div>
       {traceElements}

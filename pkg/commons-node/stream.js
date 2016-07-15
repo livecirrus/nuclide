@@ -11,7 +11,7 @@
 
 import invariant from 'assert';
 import {CompositeDisposable, Disposable} from 'event-kit';
-import {Observable, Subscription, Subject} from 'rxjs';
+import {Observable, ReplaySubject, Subscription} from 'rxjs';
 
 /**
  * Observe a stream like stdout or stderr.
@@ -131,72 +131,9 @@ export function bufferUntil<T>(
  * This is intended to be used with cold Observables. If you have a hot Observable, `cache(1)` will
  * be just fine because the hot Observable will continue producing values even when there are no
  * subscribers, so you can be assured that the cached values are up-to-date.
- *
- * Completion and error semantics are usnpec'd. If you are using this with Observables that
- * complete, come up with coherent completion semantics and implement them.
  */
 export function cacheWhileSubscribed<T>(input: Observable<T>): Observable<T> {
-  // cache() is implemented as publishBehavior().refCount
-  //
-  // publishBehavior() is implemented as multiCast(new ReplaySubject())
-  //
-  // So, we need our own Subject that implements the semantics we want.
-  return input.multicast(new CacheWhileSubscribedSubject()).refCount();
-}
-
-// Based on the implementation of ReplaySubject:
-// http://reactivex.io/rxjs/file/es6/ReplaySubject.js.html#lineNumber7
-class CacheWhileSubscribedSubject<T> extends Subject<T> {
-  _cachedValue: ?T;
-  // undefined, null, etc. are valid values so we have to store the information about whether we
-  // have a cached result separately.
-  _hasCachedValue: boolean;
-
-  _subscriberCount: number;
-
-  constructor() {
-    super();
-    this._cachedValue = null;
-    this._hasCachedValue = false;
-    this._subscriberCount = 0;
-  }
-
-  _setCachedValue(value: T): void {
-    if (this._subscriberCount === 0) {
-      return;
-    }
-    this._cachedValue = value;
-    this._hasCachedValue = true;
-  }
-
-  _clearCachedValue(): void {
-    this._cachedValue = null;
-    this._hasCachedValue = false;
-  }
-
-  next(value: T): void {
-    this._setCachedValue(value);
-    super.next(value);
-  }
-
-  _subscribe(subscriber: any): Subscription {
-    this._incrementSubscriberCount();
-    if (this._hasCachedValue && !subscriber.isUnsubscribed) {
-      subscriber.next(this._cachedValue);
-    }
-    return super._subscribe(subscriber).add(() => this._decrementSubscriberCount());
-  }
-
-  _incrementSubscriberCount(): void {
-    this._subscriberCount++;
-  }
-
-  _decrementSubscriberCount(): void {
-    this._subscriberCount--;
-    if (this._subscriberCount === 0) {
-      this._clearCachedValue();
-    }
-  }
+  return input.multicast(() => new ReplaySubject(1)).refCount();
 }
 
 type Diff<T> = {
@@ -204,10 +141,17 @@ type Diff<T> = {
   removed: Set<T>;
 };
 
-function subtractSet<T>(a: Set<T>, b: Set<T>): Set<T> {
+function subtractSet<T>(a: Set<T>, b: Set<T>, hash_?: (v: T) => any): Set<T> {
+  if (a.size === 0) {
+    return new Set();
+  } else if (b.size === 0) {
+    return new Set(a);
+  }
   const result = new Set();
+  const hash = hash_ || (x => x);
+  const bHashes = hash_ == null ? b : new Set(Array.from(b.values()).map(hash));
   a.forEach(value => {
-    if (!b.has(value)) {
+    if (!bHashes.has(hash(value))) {
       result.add(value);
     }
   });
@@ -215,36 +159,21 @@ function subtractSet<T>(a: Set<T>, b: Set<T>): Set<T> {
 }
 
 /**
- * Shallowly compare two Sets.
- */
-function setsAreEqual<T>(a: Set<T>, b: Set<T>): boolean {
-  if (a.size !== b.size) {
-    return false;
-  }
-  for (const item of a) {
-    if (!b.has(item)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
  * Given a stream of sets, return a stream of diffs.
  * **IMPORTANT:** These sets are assumed to be immutable by convention. Don't mutate them!
  */
-export function diffSets<T>(stream: Observable<Set<T>>): Observable<Diff<T>> {
+export function diffSets<T>(sets: Observable<Set<T>>, hash?: (v: T) => any): Observable<Diff<T>> {
   return Observable.concat(
       Observable.of(new Set()), // Always start with no items with an empty set
-      stream,
+      sets,
     )
-    .distinctUntilChanged(setsAreEqual)
     // $FlowFixMe(matthewwithanm): Type this.
     .pairwise()
     .map(([previous, next]) => ({
-      added: subtractSet(next, previous),
-      removed: subtractSet(previous, next),
-    }));
+      added: subtractSet(next, previous, hash),
+      removed: subtractSet(previous, next, hash),
+    }))
+    .filter(diff => diff.added.size > 0 || diff.removed.size > 0);
 }
 
 /**
@@ -254,10 +183,12 @@ export function diffSets<T>(stream: Observable<Set<T>>): Observable<Diff<T>> {
 export function reconcileSetDiffs<T>(
   diffs: Observable<Diff<T>>,
   addAction: (addedItem: T) => IDisposable,
+  hash_?: (v: T) => any,
 ): IDisposable {
+  const hash = hash_ || (x => x);
   const itemsToDisposables = new Map();
   const disposeItem = item => {
-    const disposable = itemsToDisposables.get(item);
+    const disposable = itemsToDisposables.get(hash(item));
     invariant(disposable != null);
     disposable.dispose();
     itemsToDisposables.delete(item);
@@ -271,7 +202,7 @@ export function reconcileSetDiffs<T>(
     new DisposableSubscription(
       diffs.subscribe(diff => {
         // For every item that got added, perform the add action.
-        diff.added.forEach(item => { itemsToDisposables.set(item, addAction(item)); });
+        diff.added.forEach(item => { itemsToDisposables.set(hash(item), addAction(item)); });
 
         // "Undo" the add action for each item that got removed.
         diff.removed.forEach(disposeItem);
@@ -279,6 +210,43 @@ export function reconcileSetDiffs<T>(
     ),
     new Disposable(disposeAll),
   );
+}
+
+/**
+ * Given a stream of sets, perform a side-effect whenever an item is added (i.e. is present in a
+ * set but wasn't in the previous set in the stream), and a corresponding cleanup when it's removed.
+ * **IMPORTANT:** These sets are assumed to be immutable by convention. Don't mutate them!
+ *
+ * Example:
+ *
+ *    const dogs = Observable.of(
+ *      new Set([{name: 'Winston', id: 1}, {name: 'Penelope', id: 2}]),
+ *      new Set([{name: 'Winston', id: 1}]),
+ *    );
+ *    const disposable = reconcileSets(
+ *      dogs,
+ *      dog => {
+ *        const notification = atom.notifications.addSuccess(
+ *          `${dog.name} was added!`,
+ *          {dismissable: true},
+ *        );
+ *        return new Disposable(() => { notification.dismiss(); });
+ *      },
+ *      dog => dog.id,
+ *    );
+ *
+ * The above code will first add notifications saying "Winston was added!" and "Penelope was
+ * added!", then dismiss the "Penelope" notification. Since the Winston object is in the final set
+ * of the dogs observable, his notification will remain until `disposable.dispose()` is called, at
+ * which point the cleanup for all remaining items will be performed.
+ */
+export function reconcileSets<T>(
+  sets: Observable<Set<T>>,
+  addAction: (addedItem: T) => IDisposable,
+  hash?: (v: T) => any,
+): IDisposable {
+  const diffs = diffSets(sets, hash);
+  return reconcileSetDiffs(diffs, addAction, hash);
 }
 
 export function toggle<T>(

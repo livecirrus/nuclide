@@ -11,10 +11,9 @@
 
 import {CompositeSubscription} from '../../../commons-node/stream';
 import {observableFromSubscribeFunction} from '../../../commons-node/event';
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
 import {DebuggerInstance, DebuggerProcessInfo} from '../../../nuclide-debugger-atom';
-import {
-  DebuggerProxyClient,
-} from '../../../nuclide-react-native-node-executor/lib/DebuggerProxyClient';
+import {DebuggerProxyClient} from './DebuggerProxyClient';
 import Rx from 'rxjs';
 import WS from 'ws';
 import type {Session as SessionType} from '../../../nuclide-debugger-node/lib/Session';
@@ -135,6 +134,7 @@ function createSessionStream(ws: WS, debugPort: number): Rx.Observable<SessionTy
 
   return Rx.Observable.create(observer => {
     // Creating a new Session is actually side-effecty.
+    // eslint-disable-next-line nuclide-internal/no-cross-atom-imports
     const {Session} = require('../../../nuclide-debugger-node/lib/Session');
     const session = new Session(config, debugPort, ws);
     observer.next(session);

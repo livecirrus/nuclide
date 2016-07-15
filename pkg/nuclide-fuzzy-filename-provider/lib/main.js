@@ -16,7 +16,8 @@ import typeof * as FuzzyFileSearchService from '../../nuclide-fuzzy-file-search-
 import {
   CompositeDisposable,
 } from 'atom';
-
+// eslint-disable-next-line nuclide-internal/no-cross-atom-imports
+import {BusySignalProviderBase} from '../../nuclide-busy-signal';
 import {getServiceByNuclideUri} from '../../nuclide-client';
 import {getIgnoredNames} from './utils';
 
@@ -56,6 +57,7 @@ function getActivation() {
   return activation;
 }
 let projectRoots: Set<string> = new Set();
+let busySignalProvider: ?BusySignalProviderBase = null;
 
 /**
  * @param projectPaths All the root directories in the Atom workspace.
@@ -75,9 +77,25 @@ function initSearch(projectPaths: Array<string>): void {
       // kicked off by 'fileSearchForDirectory'.
       service.isFuzzySearchAvailableFor(projectPath).then(isAvailable => {
         if (isAvailable) {
-          service.queryFuzzyFile(projectPath, 'a', getIgnoredNames());
+          const queryPromise = service.queryFuzzyFile(projectPath, 'a', getIgnoredNames());
+          if (busySignalProvider != null) {
+            busySignalProvider.reportBusy(
+              `File search: indexing files for project ${projectPath}`,
+              () => queryPromise,
+            );
+          }
         }
       });
+    }
+  });
+  // Clean up removed project roots.
+  projectRoots.forEach(projectPath => {
+    if (!newProjectRoots.has(projectPath)) {
+      const service: ?FuzzyFileSearchService = getServiceByNuclideUri(
+        'FuzzyFileSearchService', projectPath);
+      if (service != null) {
+        service.disposeFuzzySearch(projectPath);
+      }
     }
   });
   projectRoots = newProjectRoots;
@@ -85,6 +103,13 @@ function initSearch(projectPaths: Array<string>): void {
 
 export function registerProvider(): Provider {
   return getProviderInstance();
+}
+
+export function provideBusySignal(): BusySignalProviderBase {
+  if (busySignalProvider == null) {
+    busySignalProvider = new BusySignalProviderBase();
+  }
+  return busySignalProvider;
 }
 
 export function activate(state: ?Object) {

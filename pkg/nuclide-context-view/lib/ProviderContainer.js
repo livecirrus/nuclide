@@ -11,10 +11,17 @@
 
 import {React} from 'react-for-atom';
 import {Section} from '../../nuclide-ui/lib/Section';
+import {ShowMoreComponent} from '../../nuclide-ui/lib/ShowMoreComponent';
+import analytics from '../../nuclide-analytics';
 
-type ProviderContainerProps = {
+type Props = {
   title: string;
+  isEditorBased: boolean;
   children?: React.Element<any>;
+};
+
+type State = {
+  collapsed: boolean;
 };
 
 /**
@@ -22,13 +29,43 @@ type ProviderContainerProps = {
  */
 export class ProviderContainer extends React.Component {
 
-  props: ProviderContainerProps;
+  props: Props;
+  state: State;
 
-  render(): React.Element<any> {
+  constructor(props: Props): void {
+    super(props);
+    this.state = {
+      collapsed: false,
+    };
+    (this: any)._setCollapsed = this._setCollapsed.bind(this);
+  }
+
+  render(): ?React.Element<any> {
     return (
-      <Section headline={this.props.title} collapsable={true} collapsedByDefault={false}>
+      <div className="nuclide-context-view-provider-container">
+        <Section headline={this.props.title}
+          collapsable={true}
+          onChange={this._setCollapsed}
+          collapsed={this.state.collapsed}>
+          {this.props.isEditorBased ? this.props.children : this._textBasedComponent()}
+        </Section>
+      </div>
+    );
+  }
+
+  _setCollapsed(collapsed: boolean): void {
+    this.setState({collapsed});
+    analytics.track('nuclide-context-view-toggle-provider', {
+      title: this.props.title,
+      collapsed: String(collapsed),
+    });
+  }
+
+  _textBasedComponent(): React.Element<any> {
+    return (
+      <ShowMoreComponent maxHeight={600} showMoreByDefault={false}>
         {this.props.children}
-      </Section>
+      </ShowMoreComponent>
     );
   }
 }

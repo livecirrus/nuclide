@@ -12,8 +12,11 @@
 import type {NuclideUri} from '../../nuclide-remote-uri';
 
 import {asyncExecute} from '../../commons-node/process';
+import {maybeToString} from '../../commons-node/string';
+import fsPromise from '../../commons-node/fsPromise';
 import nuclideUri from '../../nuclide-remote-uri';
 import JediServerManager from './JediServerManager';
+import {parseFlake8Output} from './flake8';
 
 export type PythonCompletion = {
   type: string;
@@ -74,6 +77,15 @@ export type PythonStatementItem = {
 };
 
 export type PythonOutlineItem = PythonFunctionItem | PythonClassItem | PythonStatementItem;
+
+export type PythonDiagnostic = {
+  file: NuclideUri;
+  code: string;
+  message: string;
+  type: string;
+  line: number;
+  column: number;
+};
 
 let formatterPath;
 function getFormatterPath() {
@@ -150,6 +162,63 @@ export async function getOutline(
   return service.get_outline(src, contents);
 }
 
+// Set to false if flake8 isn't found, so we don't repeatedly fail.
+let shouldRunFlake8 = true;
+
+export async function getDiagnostics(
+  src: NuclideUri,
+  contents: string,
+): Promise<Array<PythonDiagnostic>> {
+  if (!shouldRunFlake8) {
+    return [];
+  }
+
+  const dirName = nuclideUri.dirname(src);
+  const configDir = await fsPromise.findNearestFile('.flake8', dirName);
+  const configPath = configDir ? nuclideUri.join(configDir, '.flake8') : null;
+
+  let result;
+  try {
+    result = await require('./fb/run-flake8')(src, contents, configPath);
+  } catch (e) {
+    // Ignore.
+  }
+
+  if (!result) {
+    const command =
+      global.atom && atom.config.get('nuclide.nuclide-python.pathToFlake8') || 'flake8';
+    const args = [];
+
+    if (configPath) {
+      args.push('--config');
+      args.push(configPath);
+    }
+
+    // Read contents from stdin.
+    args.push('-');
+
+    result = await asyncExecute(command, args, {cwd: dirName, stdin: contents});
+  }
+  // 1 indicates unclean lint result (i.e. has errors/warnings).
+  // A non-successful exit code can result in some cases that we want to ignore,
+  // for example when an incorrect python version is specified for a source file.
+  if (result.exitCode && result.exitCode > 1) {
+    return [];
+  } else if (result.exitCode == null) {
+    // Don't throw if flake8 is not found on the user's system.
+    if (result.errorCode === 'ENOENT') {
+      // Don't retry again.
+      shouldRunFlake8 = false;
+      return [];
+    }
+    throw new Error(
+      `flake8 failed with error: ${maybeToString(result.errorMessage)}, ` +
+      `stderr: ${result.stderr}, stdout: ${result.stdout}`
+    );
+  }
+  return parseFlake8Output(src, result.stdout);
+}
+
 export async function formatCode(
   src: NuclideUri,
   contents: string,
@@ -177,7 +246,7 @@ export async function formatCode(
     throw new Error(`"${libCommand}" failed, likely due to syntax errors.`);
   } else if (result.exitCode == null) {
     throw new Error(
-      `"${libCommand}" failed with error: ${result.errorMessage}, ` +
+      `"${libCommand}" failed with error: ${maybeToString(result.errorMessage)}, ` +
       `stderr: ${result.stderr}, stdout: ${result.stdout}.`
     );
   } else if (contents !== '' && result.stdout === '') {

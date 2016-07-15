@@ -375,7 +375,7 @@ export class FlowRoot {
     const args = ['version', '--json'];
     let json;
     try {
-      const result = await FlowProcess.execFlowClient(args);
+      const result = await FlowProcess.execFlowClient(args, this._root);
       if (result == null) {
         return null;
       }
@@ -396,7 +396,7 @@ export class FlowRoot {
 
     let json;
     try {
-      const result = await FlowProcess.execFlowClient(args, options);
+      const result = await FlowProcess.execFlowClient(args, null, options);
       if (result == null) {
         return null;
       }
@@ -421,7 +421,7 @@ function parseJSON(args: Array<any>, value: string): any {
   try {
     return JSON.parse(value);
   } catch (e) {
-    logger.error(`Invalid JSON result from flow ${args.join(' ')}. JSON:\n'${value}'.`);
+    logger.warn(`Invalid JSON result from flow ${args.join(' ')}. JSON:\n'${value}'.`);
     throw e;
   }
 }

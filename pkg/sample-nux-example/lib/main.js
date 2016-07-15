@@ -15,8 +15,6 @@ import {
   Disposable,
 } from 'atom';
 
-import {GK_NUX} from '../../nuclide-nux/lib/NuxManager';
-
 import type {NuxTourModel} from '../../nuclide-nux/lib/NuxModel';
 import type {GetToolBar} from '../../commons-atom/suda-tool-bar';
 import type {
@@ -37,17 +35,17 @@ class Activation {
     this._disposables.dispose();
   }
 
-  consumeToolBar(getToolBar: GetToolBar): void {
+  consumeToolBar(getToolBar: GetToolBar): IDisposable {
     const toolBar = getToolBar('nux-example-toolbar');
-    const toolBarButtonView = toolBar.addButton({
+    const {element} = toolBar.addButton({
       icon: 'mortar-board',
       callback: 'nux-example-toolbar:noop',
       tooltip: 'Example Nux Toolbar Item',
     });
-    toolBarButtonView.element.classList.add('sample-nux-toolbar-button');
-    this._disposables.add(new Disposable(() => {
-      toolBar.removeItems();
-    }));
+    element.classList.add('sample-nux-toolbar-button');
+    const disposable = new Disposable(() => { toolBar.removeItems(); });
+    this._disposables.add(disposable);
+    return disposable;
   }
 
   addDisposable(disposable: Disposable) {
@@ -70,9 +68,9 @@ export function deactivate() {
   }
 }
 
-export function consumeToolBar(getToolBar: GetToolBar): void {
+export function consumeToolBar(getToolBar: GetToolBar): IDisposable {
   invariant(activation != null);
-  activation.consumeToolBar(getToolBar);
+  return activation.consumeToolBar(getToolBar);
 }
 
 function generateTestNuxTour(
@@ -98,10 +96,10 @@ function generateTestNuxTour(
     nuxList,
     trigger: null,
     /* Add your own gatekeeper to control who the NUX is displayed to.
-     * Use the global `GK_NUX` if you want the NUX to always appear.
+     * Use the global `nuclide_all_nuxes` if you want the NUX to always appear.
      * See `nuclide-nux/lib/NuxModel.js` for more details.
      */
-    gatekeeperID: GK_NUX,
+    gatekeeperID: 'nuclide_all_nuxes',
   };
 }
 

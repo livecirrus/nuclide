@@ -23,15 +23,12 @@ export default class SettingsCheckbox extends React.Component {
 
   constructor(props: Object) {
     super(props);
-    (this: any)._onChanged = this._onChanged.bind(this);
+    (this: any)._handleChange = this._handleChange.bind(this);
   }
 
-  _onChanged(event: SyntheticEvent) {
+  _handleChange(event: SyntheticEvent) {
     const isChecked = ((event.target: any): HTMLInputElement).checked;
-    this.props.onChanged({
-      keyPath: this.props.keyPath,
-      newValue: isChecked,
-    });
+    this.props.onChange(isChecked);
   }
 
   render(): React.Element<any> {
@@ -47,7 +44,7 @@ export default class SettingsCheckbox extends React.Component {
           <input
             checked={value}
             id={id}
-            onChange={this._onChanged}
+            onChange={this._handleChange}
             type="checkbox"
           />
           <div className="setting-title">{title}</div>

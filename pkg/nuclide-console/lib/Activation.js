@@ -63,6 +63,11 @@ class Activation {
           atom.clipboard.write(el.innerText);
         },
       ),
+      atom.commands.add(
+        'atom-workspace',
+        'nuclide-console:clear',
+        () => this._commands.clearRecords(),
+      ),
       featureConfig.observe(
         'nuclide-console.maximumMessageCount',
         maxMessageCount => this._commands.setMaxMessageCount(maxMessageCount),
@@ -153,6 +158,7 @@ function deserializeAppState(rawState: ?Object): AppState {
     currentExecutorId: null,
     records: rawState.records || [],
     providers: new Map(),
+    providerStatuses: new Map(),
     providerSubscriptions: new Map(),
 
     // This value will be replaced with the value form the config. We just use `POSITIVE_INFINITY`

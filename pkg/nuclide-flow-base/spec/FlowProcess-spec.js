@@ -192,6 +192,7 @@ describe('FlowProcess', () => {
 
     it('should ping the server after it is started', () => {
       waitsForPromise(async () => {
+        jasmine.useRealClock();
         const states = statusUpdates.take(4).toArray().toPromise();
         fakeCheckOutput = () => {
           switch (currentStatus) {
@@ -215,11 +216,12 @@ describe('FlowProcess', () => {
 
   describe('execFlowClient', () => {
     it('should call asyncExecute', () => {
-      FlowProcess.execFlowClient(['arg']);
-      const [asyncExecuteArgs] = fakeCheckOutput.argsForCall;
-      expect(asyncExecuteArgs[0]).toEqual('flow');
-      expect(asyncExecuteArgs[1]).toEqual(['arg', '--from', 'nuclide']);
-      expect(asyncExecuteArgs[2]).toEqual({});
+      waitsForPromise(async () => {
+        await FlowProcess.execFlowClient(['arg']);
+        const [asyncExecuteArgs] = fakeCheckOutput.argsForCall;
+        expect(asyncExecuteArgs[0]).toEqual('flow');
+        expect(asyncExecuteArgs[1]).toEqual(['arg', '--from', 'nuclide']);
+      });
     });
   });
 });

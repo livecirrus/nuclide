@@ -10,9 +10,9 @@
  */
 
 import type Rx from 'rxjs';
-import type {EvaluationResult, ExpansionResult} from '../../nuclide-debugger-atom/lib/Bridge';
+import type {EvaluationResult, ExpansionResult} from '../../nuclide-debugger-atom/lib/types';
 
-export type Level = 'info' | 'log' | 'warning' | 'error' | 'debug' | Color;
+export type Level = 'info' | 'log' | 'warning' | 'error' | 'debug' | 'success' | Color;
 type Color = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'violet';
 
 type MessageKind = 'message' | 'request' | 'response';
@@ -39,10 +39,13 @@ export type AppState = {
   maxMessageCount: number;
   records: Array<Record>;
   providers: Map<string, OutputProvider>;
+  providerStatuses: Map<string, OutputProviderStatus>;
   providerSubscriptions: Map<string, rx$ISubscription>;
 };
 
-export type OutputProvider = {
+export type OutputProviderStatus = 'starting' | 'running' | 'stopped';
+
+type BasicOutputProvider = {
   messages: Rx.Observable<Message>;
   // The source can't be part of the message because we want to be able to populate a filter menu
   // before we even have any messages.
@@ -50,6 +53,22 @@ export type OutputProvider = {
   getProperties?: (objectId: string) => Rx.Observable<?ExpansionResult>;
   renderValue?: ReactClass<any>;
 };
+
+type ControllableOutputProvider = BasicOutputProvider & {
+  observeStatus(callback: (status: OutputProviderStatus) => mixed): IDisposable;
+  start(): void;
+  stop(): void;
+};
+
+export type Source = {
+  id: string;
+  name: string;
+  status: OutputProviderStatus;
+  start: ?() => void;
+  stop: ?() => void;
+};
+
+export type OutputProvider = BasicOutputProvider | ControllableOutputProvider;
 
 export type RecordProvider = {
   records: Rx.Observable<Record>;
@@ -66,7 +85,8 @@ export type Executor = {
   id: string;
   name: string;
   send(message: string): void;
-  output: Rx.Observable<Message> | Rx.Observable<{result: EvaluationResult}>;
+  // $FlowFixMe
+  output: Rx.Observable<Message> | Rx.Observable<{result?: EvaluationResult}>;
   scopeName?: string;
   getProperties?: (objectId: string) => Rx.Observable<?ExpansionResult>;
   renderValue?: ReactClass<any>;

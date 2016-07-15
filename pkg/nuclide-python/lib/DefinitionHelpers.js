@@ -14,7 +14,7 @@ import typeof * as PythonService from '../../nuclide-python-base';
 
 import invariant from 'assert';
 import {Point} from 'atom';
-import wordAtPosition from '../../commons-atom/word-at-position';
+import {wordAtPosition} from '../../commons-atom/range';
 import {getServiceByNuclideUri} from '../../nuclide-remote-connection';
 import {trackTiming} from '../../nuclide-analytics';
 import {GRAMMAR_SET} from './constants';
@@ -68,6 +68,7 @@ export default class DefinitionHelpers {
       position: new Point(definition.line, definition.column),
       id: definition.text,
       name: definition.text,
+      language: 'python',
     }));
 
     return {

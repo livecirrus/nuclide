@@ -10,20 +10,22 @@
  */
 
 import type {
-  DiagnosticUpdater,
   FileMessageUpdate,
   ObservableDiagnosticUpdater,
 } from '../../nuclide-diagnostics-base';
 import type {DistractionFreeModeProvider} from '../../nuclide-distraction-free-mode';
+import type {GetToolBar} from '../../commons-atom/suda-tool-bar';
 
 import invariant from 'assert';
-import {CompositeDisposable} from 'atom';
+import {CompositeDisposable, Disposable} from 'atom';
 
 import {track} from '../../nuclide-analytics';
 
 import type DiagnosticsPanel from './DiagnosticsPanel';
 import type StatusBarTile from './StatusBarTile';
 import type {HomeFragments} from '../../nuclide-home/lib/types';
+
+import {DisposableSubscription} from '../../commons-node/stream';
 
 const DEFAULT_HIDE_DIAGNOSTICS_PANEL = true;
 const DEFAULT_TABLE_HEIGHT = 200;
@@ -44,7 +46,6 @@ type ActivationState = {
 let activationState: ?ActivationState = null;
 
 let consumeUpdatesCalled = false;
-let consumeObservableUpdatesCalled = false;
 
 function createPanel(
   diagnosticUpdater: ObservableDiagnosticUpdater,
@@ -117,8 +118,6 @@ function tryRecordActivationState(): void {
   }
 }
 
-let toolBar: ?any = null;
-
 export function activate(state: ?Object): void {
   if (subscriptions) {
     return;
@@ -141,7 +140,9 @@ export function activate(state: ?Object): void {
   activationState = state;
 }
 
-export function consumeDiagnosticUpdates(diagnosticUpdater: DiagnosticUpdater): void {
+export function consumeDiagnosticUpdates(
+  diagnosticUpdater: ObservableDiagnosticUpdater,
+): void {
   getStatusBarTile().consumeDiagnosticUpdates(diagnosticUpdater);
   gutterConsumeDiagnosticUpdates(diagnosticUpdater);
 
@@ -150,22 +151,12 @@ export function consumeDiagnosticUpdates(diagnosticUpdater: DiagnosticUpdater): 
     return;
   }
   consumeUpdatesCalled = true;
-}
-
-export function consumeObservableDiagnosticUpdates(
-  diagnosticUpdater: ObservableDiagnosticUpdater,
-): void {
-  // TODO migrate things from consumeDiagnosticUpdates above
-  if (consumeObservableUpdatesCalled) {
-    return;
-  }
-  consumeObservableUpdatesCalled = true;
 
   tableConsumeDiagnosticUpdates(diagnosticUpdater);
   addAtomCommands(diagnosticUpdater);
 }
 
-function gutterConsumeDiagnosticUpdates(diagnosticUpdater: DiagnosticUpdater): void {
+function gutterConsumeDiagnosticUpdates(diagnosticUpdater: ObservableDiagnosticUpdater): void {
   const {applyUpdateToEditor} = require('./gutter');
 
   const fixer = diagnosticUpdater.applyFix.bind(diagnosticUpdater);
@@ -180,7 +171,9 @@ function gutterConsumeDiagnosticUpdates(diagnosticUpdater: DiagnosticUpdater): v
     const callback = (update: FileMessageUpdate) => {
       applyUpdateToEditor(editor, update, fixer);
     };
-    const disposable = diagnosticUpdater.onFileMessagesDidUpdate(callback, filePath);
+    const disposable = new DisposableSubscription(
+      diagnosticUpdater.getFileMessageUpdates(filePath).subscribe(callback),
+    );
 
     // Be sure to remove the subscription on the DiagnosticStore once the editor is closed.
     editor.onDidDestroy(() => disposable.dispose());
@@ -256,14 +249,18 @@ export function consumeStatusBar(statusBar: atom$StatusBar): void {
   getStatusBarTile().consumeStatusBar(statusBar);
 }
 
-export function consumeToolBar(getToolBar: (group: string) => Object): void {
-  toolBar = getToolBar('nuclide-diagnostics-ui');
+export function consumeToolBar(getToolBar: GetToolBar): IDisposable {
+  const toolBar = getToolBar('nuclide-diagnostics-ui');
   toolBar.addButton({
     icon: 'law',
     callback: 'nuclide-diagnostics-ui:toggle-table',
     tooltip: 'Toggle Diagnostics Table',
     priority: 200,
   });
+  const disposable = new Disposable(() => { toolBar.removeItems(); });
+  invariant(subscriptions != null);
+  subscriptions.add(disposable);
+  return disposable;
 }
 
 export function deactivate(): void {
@@ -282,9 +279,7 @@ export function deactivate(): void {
     statusBarTile = null;
   }
 
-  if (toolBar) {
-    toolBar.removeItems();
-  }
+  consumeUpdatesCalled = false;
 }
 
 export function serialize(): ActivationState {

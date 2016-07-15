@@ -14,20 +14,23 @@ import type {
    NuclideDebuggerProvider,
    NuclideEvaluationExpressionProvider,
 } from '../../nuclide-debugger-interfaces/service';
-import type {SerializedBreakpoint} from './BreakpointStore';
 import type {
   DatatipProvider,
   DatatipService,
 } from '../../nuclide-datatip/lib/types';
 import type {GetToolBar} from '../../commons-atom/suda-tool-bar';
 import type {RegisterExecutorFunction} from '../../nuclide-console/lib/types';
-import type {EvaluationResult} from './Bridge';
+import type {
+  EvaluationResult,
+  SerializedBreakpoint,
+} from './types';
 import type {Observable} from 'rxjs';
 import type {WatchExpressionStore} from './WatchExpressionStore';
 
 import {DisposableSubscription} from '../../commons-node/stream';
 import {Subject} from 'rxjs';
 import invariant from 'assert';
+import classnames from 'classnames';
 import {CompositeDisposable, Disposable} from 'atom';
 import {trackTiming} from '../../nuclide-analytics';
 import RemoteControlService from './RemoteControlService';
@@ -41,6 +44,7 @@ import {DebuggerLaunchAttachUI} from './DebuggerLaunchAttachUI';
 import nuclideUri from '../../nuclide-remote-uri';
 import {ServerConnection} from '../../nuclide-remote-connection';
 import passesGK from '../../commons-node/passesGK';
+import {PanelComponent} from '../../nuclide-ui/lib/PanelComponent';
 
 import DebuggerProcessInfo from './DebuggerProcessInfo';
 import DebuggerInstance from './DebuggerInstance';
@@ -62,29 +66,72 @@ const GK_DEBUGGER_LAUNCH_ATTACH_UI = 'nuclide_debugger_launch_attach_ui';
 const GK_DEBUGGER_UI_REVAMP = 'nuclide_debugger_ui_revamp';
 const GK_TIMEOUT = 5000;
 
+type Props = {
+  model: DebuggerModel;
+  useRevampedUi: boolean;
+};
+class DebuggerView extends React.Component {
+  props: Props;
+  state: {
+    showOldView: boolean;
+  };
+
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      showOldView: !props.useRevampedUi,
+    };
+    (this: any)._toggleOldView = this._toggleOldView.bind(this);
+  }
+
+  _toggleOldView(): void {
+    this.setState({
+      showOldView: !this.state.showOldView,
+    });
+  }
+
+  render(): React.Element<any> {
+    const {
+      model,
+    } = this.props;
+    const {showOldView} = this.state;
+    const DebuggerControllerView = require('./DebuggerControllerView');
+    return (
+      <PanelComponent initialLength={500} dock="right">
+        <div className="nuclide-debugger-root">
+          <div className={classnames({'nuclide-debugger-container-old-enabled': showOldView})}>
+            <DebuggerControllerView
+              store={model.getStore()}
+              bridge = {model.getBridge()}
+              actions={model.getActions()}
+              breakpointStore={model.getBreakpointStore()}
+              showOldView={showOldView}
+              toggleOldView={this._toggleOldView}
+            />
+          </div>
+          {!showOldView
+            ? <NewDebuggerView
+                model={model}
+                watchExpressionListStore={model.getWatchExpressionListStore()}
+              />
+            : null
+          }
+          </div>
+      </PanelComponent>
+    );
+  }
+}
+
 function createDebuggerView(model: DebuggerModel, useRevampedUi: boolean): HTMLElement {
-  const DebuggerControllerView = require('./DebuggerControllerView');
   const elem = document.createElement('div');
   elem.className = 'nuclide-debugger-container';
   ReactDOM.render(
-    <div className="nuclide-debugger-root">
-      <div className="nuclide-debugger-container-old">
-        <DebuggerControllerView
-          store={model.getStore()}
-          bridge = {model.getBridge()}
-          actions={model.getActions()}
-          breakpointStore={model.getBreakpointStore()}
-        />
-      </div>
-      {useRevampedUi
-        ? <NewDebuggerView
-            model={model}
-            watchExpressionListStore={model.getWatchExpressionListStore()}
-          />
-        : null
-      }
-    </div>,
-    elem);
+    <DebuggerView
+      model={model}
+      useRevampedUi={useRevampedUi}
+    />,
+    elem
+  );
   return elem;
 }
 
@@ -342,7 +389,6 @@ function createDatatipProvider(): DatatipProvider {
 }
 
 let activation = null;
-let toolBar: ?any = null;
 let datatipProvider: ?DatatipProvider;
 
 export function activate(state: ?SerializedState): void {
@@ -366,9 +412,6 @@ export function deactivate() {
     activation.dispose();
     activation = null;
   }
-  if (toolBar) {
-    toolBar.removeItems();
-  }
 }
 
 function registerConsoleExecutor(
@@ -388,7 +431,7 @@ function registerConsoleExecutor(
     ));
     watchExpressionStore._triggerReevaluation();
   };
-  const output: Observable<{result: EvaluationResult}> = rawOutput
+  const output: Observable<{result?: EvaluationResult}> = rawOutput
     .map(result => {
       invariant(result != null);
       return {result};
@@ -452,14 +495,18 @@ export function consumeEvaluationExpressionProvider(
   });
 }
 
-export function consumeToolBar(getToolBar: GetToolBar): void {
-  toolBar = getToolBar('nuclide-debugger');
+export function consumeToolBar(getToolBar: GetToolBar): IDisposable {
+  const toolBar = getToolBar('nuclide-debugger');
   toolBar.addButton({
     icon: 'plug',
     callback: 'nuclide-debugger:toggle',
     tooltip: 'Toggle Debugger',
     priority: 100,
   });
+  const disposable = new Disposable(() => { toolBar.removeItems(); });
+  invariant(activation);
+  activation._disposables.add(disposable);
+  return disposable;
 }
 
 export function provideRemoteControlService(): RemoteControlService {
